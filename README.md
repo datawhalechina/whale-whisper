@@ -1,77 +1,186 @@
-# WhaleWhisper
+# WhaleWhisper - 鲸语
 
-WhaleWhisper 是一个**数字人/虚拟角色框架**：提供可复用的“角色舞台（Live2D/VRM）+ 多模态交互（文本/语音）+ 智能体编排（LLM/Agent/工具调用）+ 本地记忆（SQLite）”基础能力，并提供 Web 与桌面端（Tauri）作为参考实现。
-
-## 适用场景
-- 想搭建/二次开发数字人智能体产品（聊天/沉浸式舞台/桌面挂件）
-- 需要把不同厂商/本地能力（OpenAI-compatible、Dify/FastGPT/Coze 等）用统一方式接入与切换
-- 希望在本地保存对话摘要与记忆（SQLite）并用于上下文补全（可选）
-
-## 文档导航
-- 架构：`docs/ARCHITECTURE.md`
-- 配置：`docs/CONFIG.md`
-- 协议：`docs/PROTOCOL.md`
-- 路线图：`docs/ROADMAP.md`
-
-## 快速开始
-
-### 1) 启动后端（FastAPI）
-在 `backend/` 内：
-
-- 使用 uv（推荐）
-  - `uv venv`
-  - `uv pip install -e ".[dev]"`
-  - `uv run uvicorn app.main:app --reload --port 8090`
-- 或使用 venv + pip
-  - `python -m venv .venv`
-  - `.venv\\Scripts\\activate`
-  - `pip install -e ".[dev]"`
-  - `uvicorn app.main:app --reload --port 8090`
-
-后端健康检查：`http://localhost:8090/health`  
-WebSocket：`ws://localhost:8090/ws`  
-能力接口：`/api/llm`、`/api/asr`、`/api/tts`、`/api/agent`、`/api/memory`、`/api/providers`
-
-### 2) 启动前端（Web）
-在 `frontend/` 内：
-- `pnpm install`
-- `pnpm --filter @whalewhisper/web dev`
-
-如需桌面端（Tauri）构建入口：`scripts/build-desktop.ps1`（需要 Rust/Tauri 工具链）。
-
-## 配置要点
-- 后端 engine 配置：`ENGINE_CONFIG_PATH`（默认 `backend/config/engines.yaml`），详见 `docs/CONFIG.md`
-- 可选鉴权：`WS_AUTH_TOKEN`（启用后客户端需先做 module.authenticate）
-- 本地记忆：默认 SQLite，相关环境变量见 `backend/README.md`
-
-## 仓库结构
-- `backend/`：FastAPI 编排服务（HTTP + WS + SSE 能力端点）
-- `frontend/`：pnpm workspace（web + desktop renderer + packages）
-- `docs/`：架构/协议/配置/路线图
-- `assets/`：静态资源（模型/素材等）
-
-## 参与贡献
-- 建议先开 Issue 描述问题/需求（复现步骤、日志、期望行为）
-- PR 请尽量保持改动聚焦，并附上本地验证方式（如 `pnpm build` / `python -m compileall`）
-
-## 参与贡献（组织说明）
-
-- 如果你发现了一些问题，可以提Issue进行反馈，如果提完没有人回复你可以联系[保姆团队](https://github.com/datawhalechina/DOPMC/blob/main/OP.md)的同学进行反馈跟进~
-- 如果你想参与贡献本项目，可以提Pull request，如果提完没有人回复你可以联系[保姆团队](https://github.com/datawhalechina/DOPMC/blob/main/OP.md)的同学进行反馈跟进~
-- 如果你对 Datawhale 很感兴趣并想要发起一个新的项目，请按照[Datawhale开源项目指南](https://github.com/datawhalechina/DOPMC/blob/main/GUIDE.md)进行操作即可~
-
-## 关注我们
-
-<div align=center>
-<p>扫描下方二维码关注公众号：Datawhale</p>
-<img src="https://raw.githubusercontent.com/datawhalechina/pumpkin-book/master/res/qrcode.jpeg" width = "180" height = "180">
-</div>
-
-## LICENSE
+<div align="center">
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688.svg)](https://fastapi.tiangolo.com/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0%2B-3178c6.svg)](https://www.typescriptlang.org/)
 
-本项目采用 Apache License 2.0 进行许可，详见 `LICENSE`。
+**模块化的数字人/虚拟角色智能体框架**
 
-## 致谢
-- https://github.com/moeru-ai/airi
+[特性](#-核心特性) • [开发状态](#-开发状态) • [快速开始](#-快速开始) • [贡献](#-参与贡献)
+
+</div>
+
+---
+
+## 📖 项目简介
+
+WhaleWhisper 是一个**模块化的数字人/虚拟角色框架**，为开发者提供完整的数字人智能体解决方案。
+
+**核心能力：**
+- **角色舞台**：支持 Live2D/VRM 模型渲染（开发中）
+- **多模态交互**：文本对话 + 语音识别(ASR) + 语音合成(TTS)
+- **智能体编排**：LLM 推理 + Agent 工作流 + 工具调用
+- **本地记忆**：基于 SQLite 的对话记忆与上下文管理
+- **多端支持**：Web 应用 + Tauri 桌面端
+
+## ✨ 核心特性
+
+- **统一接入层**：兼容 OpenAI、Dify、FastGPT、Coze 等多种 LLM 服务
+- **灵活配置**：YAML 配置驱动，快速切换不同 AI 能力提供商
+- **实时通信**：支持 WebSocket 和 Server-Sent Events (SSE)
+- **记忆系统**：自动保存对话历史，支持长期记忆与摘要
+- **可扩展架构**：模块化设计，易于定制和扩展
+
+## 🎯 适用场景
+
+- 数字人聊天助手、虚拟主播原型开发
+- 集成多家 AI 服务商能力的统一调度
+- 需要对话记忆和上下文管理的对话系统
+- 虚拟角色交互体验探索
+
+## 🏗️ 技术栈
+
+- **后端**：FastAPI, SQLAlchemy, WebSocket/SSE
+- **前端**：Vue 3, TypeScript, Tauri, Pixi.js
+- **AI**：兼容 OpenAI/Dify/Coze/FastGPT 等协议
+
+## 🚧 开发状态
+
+本项目正在积极开发中，部分功能可能尚未完全稳定：
+
+- ✅ **核心对话系统**：基本可用
+- ✅ **记忆系统**：完整实现
+- ⚠️ **Live2D/VRM 渲染**：部分功能调试中
+- ⚠️ **AI 服务商集成**：部分提供商还在测试
+- 🔨 **桌面端**：持续优化中
+
+欢迎提交 Issue 反馈问题或建议！
+
+## 🚀 快速开始
+
+### 前置要求
+
+- Python 3.8+
+- Node.js 16+
+- pnpm 8+
+
+### 1️⃣ 启动后端
+
+```bash
+cd backend
+
+# 方式一：使用 uv（推荐）
+uv venv
+uv pip install -e ".[dev]"
+uv run uvicorn app.main:app --reload --port 8090
+
+# 方式二：使用传统 venv
+python -m venv .venv
+.venv\Scripts\activate  # Windows
+# source .venv/bin/activate  # Linux/Mac
+pip install -e ".[dev]"
+uvicorn app.main:app --reload --port 8090
+```
+
+**验证服务：**
+- 健康检查：http://localhost:8090/health
+- WebSocket：ws://localhost:8090/ws
+- API 端点：`/api/llm`、`/api/asr`、`/api/tts`、`/api/agent`、`/api/memory`、`/api/providers`
+
+### 2️⃣ 启动前端
+
+```bash
+cd frontend
+
+# 安装依赖
+pnpm install
+
+# 启动 Web 开发服务器
+pnpm --filter @whalewhisper/web dev
+
+# 构建桌面应用（可选，需要 Rust/Tauri 工具链）
+# 使用 scripts/build-desktop.ps1
+```
+
+访问 http://localhost:5173 即可使用。
+
+## ⚙️ 配置说明
+
+### Engine 配置
+
+编辑 `backend/config/engines.yaml` 配置 LLM/ASR/TTS 等能力提供商：
+
+```yaml
+llm:
+  default: openai
+  providers:
+    openai:
+      api_key: "your-api-key"
+      model: "gpt-4"
+```
+
+### 环境变量
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `ENGINE_CONFIG_PATH` | Engine 配置文件路径 | `backend/config/engines.yaml` |
+| `WS_AUTH_TOKEN` | WebSocket 鉴权令牌（可选） | - |
+| `DATABASE_URL` | 数据库连接字符串 | SQLite 本地文件 |
+
+## 📁 项目结构
+
+```
+WhaleWhisper/
+├── backend/          # FastAPI 后端服务
+│   ├── app/         # 应用核心代码
+│   ├── config/      # 配置文件
+│   └── tests/       # 单元测试
+├── frontend/         # 前端工作空间（pnpm workspace）
+│   ├── web/         # Web 应用
+│   ├── desktop/     # Tauri 桌面应用
+│   └── packages/    # 共享组件库
+├── docs/            # 项目文档
+├── assets/          # 静态资源（模型、素材）
+└── scripts/         # 构建与部署脚本
+```
+
+## 🤝 参与贡献
+
+我们欢迎所有形式的贡献！无论是报告问题、提出建议还是提交代码。
+
+### 如何贡献
+
+1. **报告问题**：在 [Issues](https://github.com/datawhalechina/WhaleWhisper/issues) 中描述问题、复现步骤和日志
+2. **提交 PR**：
+   - Fork 本仓库
+   - 创建特性分支：`git checkout -b feature/your-feature`
+   - 提交改动：`git commit -m 'Add some feature'`
+   - 推送分支：`git push origin feature/your-feature`
+   - 提交 Pull Request
+
+### 贡献指南
+
+- PR 请保持改动聚焦，避免混合多个功能
+- 提交前请运行测试：`pnpm build` / `python -m compileall`
+- 遵循现有代码风格和项目规范
+- 如果 PR 长时间无回复，可联系 [Datawhale 保姆团队](https://github.com/datawhalechina/DOPMC/blob/main/OP.md)
+
+## 🌐 关注我们
+
+<div align="center">
+<p>扫描下方二维码关注公众号：Datawhale</p>
+<img src="https://raw.githubusercontent.com/datawhalechina/pumpkin-book/master/res/qrcode.jpeg" width="180" height="180">
+</div>
+
+## 📄 开源协议
+
+本项目采用 [Apache License 2.0](LICENSE) 进行许可。
+
+## 🙏 致谢
+
+感谢以下项目的启发和参考：
+- [airi](https://github.com/moeru-ai/airi) - 数字人交互框架
+
