@@ -1,4 +1,4 @@
-# WhaleWhisper - 鲸语
+# WhaleWhisper - 鲸语（⚠️ Alpha内测版）
 
 <div align="center">
 
@@ -155,6 +155,22 @@ WhaleWhisper/
 └── scripts/         # 构建与部署脚本
 ```
 
+## 🙏 致谢
+
+**核心贡献者**
+- [dalvqw-项目负责人](https://github.com/FutureUnreal)（项目发起人与主要贡献者）
+- [黎又榛-项目负责人](https://github.com/1iyouzhen)（项目负责人与主要贡献者）
+
+### 特别感谢
+- 感谢 [@Sm1les](https://github.com/Sm1les) 对本项目的帮助与支持
+- 感谢所有为本项目做出贡献的开发者们
+- 感谢开源社区提供的优秀工具和框架支持
+- 特别感谢以下为教程做出贡献的开发者！
+
+[![Contributors](https://contrib.rocks/image?repo=datawhalechina/base-nlp)](https://github.com/datawhalechina/base-nlp/graphs/contributors)
+
+*Made with [contrib.rocks](https://contrib.rocks).*
+
 ## 🤝 参与贡献
 
 我们欢迎所有形式的贡献！无论是报告问题、提出建议还是提交代码。
@@ -183,12 +199,12 @@ WhaleWhisper/
 <img src="https://raw.githubusercontent.com/datawhalechina/pumpkin-book/master/res/qrcode.jpeg" width="180" height="180">
 </div>
 
-## 📄 开源协议
-
-本项目采用 [Apache License 2.0](LICENSE) 进行许可。
-
-## 🙏 致谢
+---
 
 感谢以下项目的启发和参考：
 - [airi](https://github.com/moeru-ai/airi) - 数字人交互框架
+
+## 📄 开源协议
+
+本项目采用 [Apache License 2.0](LICENSE) 进行许可。
 
