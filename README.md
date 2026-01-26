@@ -159,7 +159,7 @@ WhaleWhisper/
 
 **核心贡献者**
 - [dalvqw-项目负责人](https://github.com/FutureUnreal)（项目发起人与主要贡献者）
-- [黎又榛-项目负责人](https://github.com/1iyouzhen)（项目负责人与主要贡献者）
+- [黎又榛-项目负责人](https://github.com/1iyouzhen)（项目负责人）
 
 ### 特别感谢
 - 感谢 [@Sm1les](https://github.com/Sm1les) 对本项目的帮助与支持
