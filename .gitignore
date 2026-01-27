@@ -17,7 +17,8 @@ target/
 *.log
 
 # Local data
-data/
+/data/
+backend/data/
 
 # IDE
 .vscode/
