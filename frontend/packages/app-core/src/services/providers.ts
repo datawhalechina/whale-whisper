@@ -62,10 +62,36 @@ function categoryToEnginePath(category: ProviderCategory) {
   return "asr";
 }
 
-export async function checkEngineHealth(category: ProviderCategory, engineId: string) {
+export async function checkEngineHealth(
+  category: ProviderCategory,
+  engineId: string,
+  config?: ProviderConfig,
+) {
   const baseUrl = resolveApiBaseUrl();
   const path = `/api/${categoryToEnginePath(category)}/engines/${engineId}/health`;
-  const response = await fetch(`${baseUrl}${path}`);
+  
+  let response: Response;
+  if (config) {
+    // 使用 POST 方法传递配置
+    const requestBody = {
+      config: {
+        apiKey: config.apiKey,
+        baseUrl: config.baseUrl,
+        ...config.extra,
+      },
+    };
+    response = await fetch(`${baseUrl}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+  } else {
+    // 使用 GET 方法（向后兼容）
+    response = await fetch(`${baseUrl}${path}`);
+  }
+  
   if (!response.ok) {
     throw new Error(`Health check failed: ${response.status}`);
   }
@@ -100,7 +126,7 @@ export async function listProviderModels(option: ProviderCatalogEntry, config: P
   }
 
   const result = await requestProxy<{ models?: SelectOption[]; data?: { models?: SelectOption[] } }>(
-    "/providers/models",
+    "/api/providers/models",
     {
       providerId: option.id,
       apiKey: config.apiKey ?? "",

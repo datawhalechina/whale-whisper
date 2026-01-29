@@ -79,6 +79,15 @@ llm:
       paths:
         chat: /chat/completions
         health: /models
+    - id: glm
+      label: GLM
+      type: openai_compat
+      base_url: https://open.bigmodel.cn/api/paas/v4/
+      model: glm-4.7-flash
+      api_key_env: GLM_API_KEY
+      paths:
+        chat: /chat/completions
+        health: /models
 tts:
   default: openai-tts
   engines:

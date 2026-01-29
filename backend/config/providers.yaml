@@ -811,3 +811,20 @@ providers:
     icon: i-lobe-icons:huggingface
     description: Local browser transcription runtime.
     fields: []
+  - id: glm
+    label: GLM
+    category: chat
+    icon: i-lobe-icons:zhipu
+    description: GLM model via open.bigmodel.cn
+    engine_id: glm
+    defaults:
+      base_url: https://open.bigmodel.cn/api/paas/v4/
+    fields:
+      - id: apiKey
+        label: API Key
+        type: secret
+        required: true
+      - id: model
+        label: Model
+        type: select
+        options_source: models

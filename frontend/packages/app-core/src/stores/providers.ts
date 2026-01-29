@@ -481,7 +481,7 @@ export const useProvidersStore = defineStore("providers", () => {
     if (option) {
       if (usesEngineHealth && engineId) {
         try {
-          const health = await checkEngineHealth(option.category, engineId);
+          const health = await checkEngineHealth(option.category, engineId, config);
           if (!health.ok) {
             runtime.status = "offline";
             runtime.lastError = formatHealthMessage(health, t) || t("health.failed", "Health check failed.");

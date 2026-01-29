@@ -49,9 +49,7 @@ const openAiTtsModels: SelectOption[] = [
   { id: "tts-1-hd", label: "tts-1-hd" },
 ];
 
-const whisperModels: SelectOption[] = [
-  { id: "whisper-1", label: "whisper-1" },
-];
+const whisperModels: SelectOption[] = [{ id: "whisper-1", label: "whisper-1" }];
 
 export const chatProviderOptions: ProviderOption[] = [
   {
@@ -473,6 +471,18 @@ export const transcriptionProviderOptions: ProviderOption[] = [
     icon: "i-lobe-icons:huggingface",
     description: "Local browser transcription runtime.",
     category: "transcription",
+  },
+  {
+    id: "glm",
+    label: "GLM",
+    icon: "i-lobe-icons:zhipu",
+    description: "GLM (智谱AI) models.",
+    category: "chat",
+    engineId: "glm",
+    defaultBaseUrl: "https://open.bigmodel.cn/api/paas/v4/",
+    requiresApiKey: true,
+    requiresBaseUrl: true,
+    supportsModels: true,
   },
 ];
 

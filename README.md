@@ -188,7 +188,7 @@ WhaleWhisper/
 ### 贡献指南
 
 - PR 请保持改动聚焦，避免混合多个功能
-- 提交前请运行测试：`pnpm build` / `python -m compileall`
+- 提交前请运行测试：`pnpm build:dev` / `python -m compileall`
 - 遵循现有代码风格和项目规范
 - 如果 PR 长时间无回复，可联系 [Datawhale 保姆团队](https://github.com/datawhalechina/DOPMC/blob/main/OP.md)
 

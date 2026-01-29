@@ -35,6 +35,8 @@ OPENAI_COMPAT_IDS = {
     "moonshot-ai",
     "modelscope",
     "player2",
+    "groq",
+    "glm",
 }
 
 
@@ -99,7 +101,8 @@ class ProviderRegistry:
         models = data.get("data") if isinstance(data, dict) else None
         if not isinstance(models, list):
             return []
-        return [
+        
+        result = [
             {
                 "id": item.get("id", "unknown"),
                 "label": item.get("id", "unknown"),
@@ -107,6 +110,20 @@ class ProviderRegistry:
             for item in models
             if isinstance(item, dict)
         ]
+        
+        # GLM 的 /models API 不返回免费模型，手动添加免费文本模型
+        if "bigmodel.cn" in config.base_url:
+            extra_models = [
+                {"id": "glm-4.7-flash", "label": "glm-4.7-flash (免费)"},
+                {"id": "glm-4-flash-250414", "label": "glm-4-flash-250414 (免费)"},
+            ]
+            # 合并并去重
+            existing_ids = {m["id"] for m in result}
+            for model in extra_models:
+                if model["id"] not in existing_ids:
+                    result.append(model)
+        
+        return result
 
 
 registry = ProviderRegistry()

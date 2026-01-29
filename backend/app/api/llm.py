@@ -4,6 +4,7 @@ from typing import Any, AsyncIterator, Dict, Iterator, List, Optional
 import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 from app.api.engine_schemas import (
     EngineDefaultResponse,
@@ -19,6 +20,10 @@ from app.services.engines.health import check_engine_health
 from app.core.http_utils import resolve_api_key, sanitize_config
 
 router = APIRouter(prefix="/llm", tags=["llm"])
+
+
+class LLMHealthRequest(BaseModel):
+    config: Dict[str, Any] = Field(default_factory=dict)
 
 
 def _sse_error(message: str) -> Iterator[str]:
@@ -51,6 +56,25 @@ async def get_llm_engine_health(engine: str) -> HealthResponse:
     if not config:
         raise HTTPException(status_code=404, detail="Engine not found")
     return HealthResponse(**await check_engine_health(config))
+
+
+@router.post("/engines/{engine}/health", response_model=HealthResponse)
+async def post_llm_engine_health(engine: str, request: LLMHealthRequest) -> HealthResponse:
+    config = runtime_store.get("llm", engine)
+    if not config:
+        raise HTTPException(status_code=404, detail="Engine not found")
+    
+    overrides = request.config if isinstance(request.config, dict) else {}
+    base_url = overrides.get("base_url") or overrides.get("baseUrl")
+    api_key = overrides.get("api_key") or overrides.get("apiKey")
+    
+    return HealthResponse(
+        **await check_engine_health(
+            config,
+            base_url_override=str(base_url) if base_url else None,
+            api_key_override=str(api_key) if api_key else None,
+        )
+    )
 
 
 @router.post("/engines")
