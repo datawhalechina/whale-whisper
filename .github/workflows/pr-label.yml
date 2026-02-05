@@ -1,0 +1,152 @@
+name: PR Labels
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  label:
+    if: "!endsWith(github.actor, '[bot]')"
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      pull-requests: read
+      issues: write
+
+    steps:
+      - name: Apply size/type/area labels
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            const prNumber = context.payload.pull_request.number;
+
+            const labelSpecs = {
+              "size/XS": { color: "ededed", description: "PR size: < 50 lines changed" },
+              "size/S": { color: "c5def5", description: "PR size: < 200 lines changed" },
+              "size/M": { color: "bfe5bf", description: "PR size: < 500 lines changed" },
+              "size/L": { color: "fef2c0", description: "PR size: < 1000 lines changed" },
+              "size/XL": { color: "f9d0c4", description: "PR size: >= 1000 lines changed" },
+
+              "area/backend": { color: "1d76db", description: "Touches backend (FastAPI/Python)" },
+              "area/frontend": { color: "a2eeef", description: "Touches frontend (Vue/TS)" },
+              "area/ci": { color: "5319e7", description: "Touches CI/CD (.github)" },
+              "area/docs": { color: "0075ca", description: "Touches docs/README" },
+              "area/scripts": { color: "d4c5f9", description: "Touches scripts/tooling" },
+
+              "type/bug": { color: "d73a4a", description: "Bug fix" },
+              "type/feature": { color: "0e8a16", description: "New feature" },
+              "type/docs": { color: "0075ca", description: "Documentation changes" },
+              "type/chore": { color: "cfd3d7", description: "Chore / maintenance" },
+              "type/refactor": { color: "fbca04", description: "Refactor without behavior change" },
+              "type/test": { color: "b60205", description: "Tests" },
+              "type/perf": { color: "1d76db", description: "Performance improvement" },
+
+              "needs-review": { color: "f9d0c4", description: "Needs careful review (large/complex changes)" },
+            };
+
+            async function ensureLabel(name) {
+              const spec = labelSpecs[name] || { color: "cfd3d7", description: "" };
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name });
+                return;
+              } catch (e) {
+                if (e.status !== 404) throw e;
+              }
+              try {
+                await github.rest.issues.createLabel({
+                  owner,
+                  repo,
+                  name,
+                  color: spec.color,
+                  description: spec.description,
+                });
+              } catch (e) {
+                // 422 if it already exists (race)
+                if (e.status !== 422) throw e;
+              }
+            }
+
+            const pr = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+            const additions = pr.data.additions || 0;
+            const deletions = pr.data.deletions || 0;
+            const total = additions + deletions;
+
+            function computeSizeLabel(linesChanged) {
+              if (linesChanged < 50) return "size/XS";
+              if (linesChanged < 200) return "size/S";
+              if (linesChanged < 500) return "size/M";
+              if (linesChanged < 1000) return "size/L";
+              return "size/XL";
+            }
+
+            const desired = new Set();
+            const size = computeSizeLabel(total);
+            desired.add(size);
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+            const paths = files.map((f) => f.filename);
+
+            if (paths.some((p) => p.startsWith("backend/"))) desired.add("area/backend");
+            if (paths.some((p) => p.startsWith("frontend/"))) desired.add("area/frontend");
+            if (paths.some((p) => p.startsWith(".github/"))) desired.add("area/ci");
+            if (paths.some((p) => p === "README.md" || p.startsWith("docs/"))) desired.add("area/docs");
+            if (paths.some((p) => p.startsWith("scripts/"))) desired.add("area/scripts");
+
+            const title = (pr.data.title || "").trim();
+            const typeMap = {
+              feat: "type/feature",
+              fix: "type/bug",
+              docs: "type/docs",
+              chore: "type/chore",
+              refactor: "type/refactor",
+              test: "type/test",
+              perf: "type/perf",
+            };
+            const m = title.match(/^(feat|fix|docs|chore|refactor|test|perf)(\(.+\))?:/i);
+            const inferredType = m ? typeMap[m[1].toLowerCase()] : null;
+
+            // Only add a type label if PR doesn't already have one.
+            const currentLabels = await github.paginate(github.rest.issues.listLabelsOnIssue, {
+              owner,
+              repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+            const currentNames = currentLabels.map((l) => l.name);
+            const hasType = currentNames.some((n) => n.startsWith("type/"));
+            if (inferredType && !hasType) desired.add(inferredType);
+
+            if (total >= 500 || paths.length >= 20) desired.add("needs-review");
+
+            for (const name of desired) {
+              await ensureLabel(name);
+            }
+
+            // Remove old size labels to keep exactly one.
+            const desiredSize = size;
+            const sizeLabelsToRemove = currentNames.filter(
+              (n) => n.startsWith("size/") && n !== desiredSize
+            );
+            for (const n of sizeLabelsToRemove) {
+              try {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number: prNumber, name: n });
+              } catch (e) {
+                // ignore missing/race
+                if (e.status !== 404) throw e;
+              }
+            }
+
+            const toAdd = [...desired].filter((n) => !currentNames.includes(n));
+            if (toAdd.length) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number: prNumber, labels: toAdd });
+            }
+

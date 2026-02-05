@@ -19,8 +19,16 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install backend (editable)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e backend
       - name: Backend syntax check (compileall)
         run: python -m compileall -q backend/app
+      - name: Backend import smoke test
+        run: python -c "from app.main import app; print('backend app import: ok')"
 
   frontend:
     if: github.event.pull_request.draft == false
@@ -45,4 +53,3 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Build web app
         run: pnpm --filter @whalewhisper/web build
-

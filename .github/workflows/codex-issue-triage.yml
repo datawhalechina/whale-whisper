@@ -1,0 +1,153 @@
+name: Codex Issue Triage
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  triage:
+    if: |
+      !endsWith(github.actor, '[bot]') &&
+      secrets.OPENAI_API_KEY != ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout repository (for docs context)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Run Codex triage
+        id: run_codex
+        uses: openai/codex-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_REPO: ${{ github.repository }}
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          responses-api-endpoint: ${{ secrets.OPENAI_BASE_URL || 'https://api.openai.com/v1' }}
+          model: ${{ vars.OPENAI_MODEL || 'gpt-5.2' }}
+          effort: ${{ vars.OPENAI_EFFORT || 'medium' }}
+          sandbox: read-only
+          safety-strategy: drop-sudo
+          prompt-file: .github/prompts/codex-issue-triage.md
+
+      - name: Apply labels and upsert comment
+        if: steps.run_codex.outputs.final-message != ''
+        uses: actions/github-script@v7
+        env:
+          TRIAGE_JSON: ${{ steps.run_codex.outputs.final-message }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const raw = process.env.TRIAGE_JSON || "";
+
+            function extractJson(text) {
+              const first = text.indexOf("{");
+              const last = text.lastIndexOf("}");
+              if (first === -1 || last === -1 || last <= first) {
+                throw new Error("No JSON object found in Codex output");
+              }
+              return text.slice(first, last + 1);
+            }
+
+            let data;
+            try {
+              data = JSON.parse(raw);
+            } catch {
+              data = JSON.parse(extractJson(raw));
+            }
+
+            const labels = Array.isArray(data.labels)
+              ? data.labels
+                  .filter((x) => typeof x === "string")
+                  .map((x) => x.trim())
+                  .filter(Boolean)
+                  .slice(0, 8)
+              : [];
+
+            const comment = typeof data.comment === "string" ? data.comment.trim() : "";
+
+            const marker = "<!-- codex-issue-triage -->";
+            const body = `${marker}\n${comment}`.trim() + "\n";
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.issue.number;
+
+            const labelSpecs = {
+              "type/bug": { color: "d73a4a", description: "Bug report" },
+              "type/feature": { color: "0e8a16", description: "Feature request" },
+              "type/question": { color: "d876e3", description: "Question / support" },
+              "type/docs": { color: "0075ca", description: "Documentation" },
+              "type/chore": { color: "cfd3d7", description: "Chore / maintenance" },
+
+              "area/backend": { color: "1d76db", description: "Backend (FastAPI/Python)" },
+              "area/frontend": { color: "a2eeef", description: "Frontend (Vue/TS)" },
+              "area/ci": { color: "5319e7", description: "CI/CD (.github)" },
+              "area/docs": { color: "0075ca", description: "Docs/README" },
+
+              "needs-info": { color: "fbca04", description: "Needs more information to proceed" },
+              "status/stale": { color: "cfd3d7", description: "Stale / inactive" },
+            };
+
+            async function ensureLabel(name) {
+              const spec = labelSpecs[name] || { color: "cfd3d7", description: "" };
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name });
+                return;
+              } catch (e) {
+                if (e.status !== 404) throw e;
+              }
+              try {
+                await github.rest.issues.createLabel({
+                  owner,
+                  repo,
+                  name,
+                  color: spec.color,
+                  description: spec.description,
+                });
+              } catch (e) {
+                if (e.status !== 422) throw e;
+              }
+            }
+
+            for (const name of labels) {
+              await ensureLabel(name);
+            }
+
+            if (labels.length) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number, labels });
+            }
+
+            if (comment) {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner,
+                repo,
+                issue_number,
+                per_page: 100,
+              });
+              const existing = comments.find((c) => {
+                const isBot = c.user?.type === "Bot";
+                return isBot && typeof c.body === "string" && c.body.includes(marker);
+              });
+
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner,
+                  repo,
+                  comment_id: existing.id,
+                  body,
+                });
+              } else {
+                await github.rest.issues.createComment({ owner, repo, issue_number, body });
+              }
+            }
+

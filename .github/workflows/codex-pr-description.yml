@@ -1,0 +1,104 @@
+name: Codex PR Description
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  pr-description:
+    if: |
+      github.event.pull_request.draft == false &&
+      !endsWith(github.actor, '[bot]') &&
+      secrets.OPENAI_API_KEY != ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout base (safe)
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+
+      - name: Generate PR description section
+        id: run_codex
+        uses: openai/codex-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_REPO: ${{ github.repository }}
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          responses-api-endpoint: ${{ secrets.OPENAI_BASE_URL || 'https://api.openai.com/v1' }}
+          model: ${{ vars.OPENAI_MODEL || 'gpt-5.2' }}
+          effort: ${{ vars.OPENAI_EFFORT || 'medium' }}
+          sandbox: read-only
+          safety-strategy: drop-sudo
+          prompt-file: .github/prompts/codex-pr-description.md
+
+      - name: Upsert PR body section
+        if: steps.run_codex.outputs.final-message != ''
+        uses: actions/github-script@v7
+        env:
+          GENERATED: ${{ steps.run_codex.outputs.final-message }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const generated = (process.env.GENERATED || "").trim();
+            if (!generated) return;
+
+            const startMarker = "<!-- codex-pr-description:start -->";
+            const endMarker = "<!-- codex-pr-description:end -->";
+            const header = "## 📝 PR 说明（Codex 自动生成）";
+
+            const { owner, repo } = context.repo;
+            const pull_number = context.payload.pull_request.number;
+
+            const pr = await github.rest.pulls.get({ owner, repo, pull_number });
+            const oldBody = pr.data.body || "";
+
+            let section = `${startMarker}\n\n${header}\n\n${generated}\n\n${endMarker}\n`;
+
+            const maxSectionLen = 18000;
+            if (section.length > maxSectionLen) {
+              section =
+                `${startMarker}\n\n${header}\n\n` +
+                section.slice(0, maxSectionLen - 500) +
+                `\n\n---\n(Truncated)\n\n${endMarker}\n`;
+            }
+
+            function escapeRegExp(s) {
+              return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            }
+
+            const pattern = new RegExp(
+              `${escapeRegExp(startMarker)}[\\s\\S]*?${escapeRegExp(endMarker)}\\n?`,
+              "m"
+            );
+
+            let newBody;
+            if (pattern.test(oldBody)) {
+              newBody = oldBody.replace(pattern, section).trimEnd() + "\n";
+            } else {
+              newBody = oldBody.trimEnd();
+              if (newBody) newBody += "\n\n";
+              newBody += section;
+            }
+
+            // Keep within GitHub limits; if too long, keep user body and append a smaller section.
+            const maxBodyLen = 65000;
+            if (newBody.length > maxBodyLen) {
+              const tiny = `${startMarker}\n\n${header}\n\n${generated.slice(0, 4000)}\n\n${endMarker}\n`;
+              newBody = oldBody.trimEnd();
+              if (newBody) newBody += "\n\n";
+              newBody += tiny;
+            }
+
+            await github.rest.pulls.update({ owner, repo, pull_number, body: newBody });
+
