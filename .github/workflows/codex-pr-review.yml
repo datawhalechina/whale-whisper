@@ -1,0 +1,92 @@
+name: Codex PR Review
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  pr-review:
+    if: |
+      github.event.pull_request.draft == false &&
+      !endsWith(github.actor, '[bot]') &&
+      secrets.OPENAI_API_KEY != ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: write
+
+    steps:
+      - name: Checkout base branch (safe)
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+
+      - name: Run Codex review
+        id: run_codex
+        uses: openai/codex-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_REPO: ${{ github.repository }}
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          responses-api-endpoint: ${{ secrets.OPENAI_BASE_URL || 'https://api.openai.com/v1' }}
+          model: ${{ vars.OPENAI_MODEL || 'gpt-5.2' }}
+          effort: ${{ vars.OPENAI_EFFORT || 'high' }}
+          sandbox: read-only
+          safety-strategy: drop-sudo
+          prompt-file: .github/prompts/codex-pr-review.md
+
+      - name: Upsert PR comment
+        if: steps.run_codex.outputs.final-message != ''
+        uses: actions/github-script@v7
+        env:
+          REVIEW_BODY: ${{ steps.run_codex.outputs.final-message }}
+          MARKER: "<!-- codex-pr-review -->"
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const marker = process.env.MARKER;
+            const reviewBody = process.env.REVIEW_BODY || "";
+            let body = `${marker}\n${reviewBody}`.trim() + "\n";
+            const maxLen = 65000;
+            if (body.length > maxLen) {
+              body =
+                body.slice(0, maxLen - 500) +
+                "\n\n---\n(Truncated: review output exceeded GitHub comment limit.)\n";
+            }
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              { owner, repo, issue_number, per_page: 100 }
+            );
+
+            const existing = comments.find((c) => {
+              const isBot = c.user?.type === "Bot";
+              return isBot && typeof c.body === "string" && c.body.includes(marker);
+            });
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }
