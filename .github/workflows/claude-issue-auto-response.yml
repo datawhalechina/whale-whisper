@@ -1,0 +1,140 @@
+name: Claude Issue Auto Response (Fallback)
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  decide:
+    if: |
+      !endsWith(github.actor, '[bot]') &&
+      secrets.ANTHROPIC_API_KEY != ''
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Decide whether to run Claude
+        id: check
+        uses: actions/github-script@v7
+        env:
+          HAS_OPENAI_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const hasOpenAI = process.env.HAS_OPENAI_KEY === "true";
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.issue.number;
+
+            // If Codex isn't configured, run Claude immediately.
+            if (!hasOpenAI) {
+              core.setOutput("should_run", "true");
+              return;
+            }
+
+            // Otherwise, wait for Codex triage comment marker.
+            const marker = "<!-- codex-issue-triage -->";
+            const maxWaitMs = 4 * 60 * 1000;
+            const intervalMs = 20 * 1000;
+            const start = Date.now();
+
+            function sleep(ms) {
+              return new Promise((r) => setTimeout(r, ms));
+            }
+
+            while (Date.now() - start < maxWaitMs) {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner,
+                repo,
+                issue_number,
+                per_page: 100,
+              });
+              const hasCodex = comments.some((c) => typeof c.body === "string" && c.body.includes(marker));
+              if (hasCodex) {
+                core.setOutput("should_run", "false");
+                return;
+              }
+              await sleep(intervalMs);
+            }
+
+            // Timeout: run Claude so the issue still gets an initial response.
+            core.setOutput("should_run", "true");
+
+  auto-response:
+    needs: decide
+    if: needs.decide.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Ensure common labels exist
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            const labelSpecs = {
+              "type/bug": { color: "d73a4a", description: "Bug report" },
+              "type/feature": { color: "0e8a16", description: "Feature request" },
+              "type/question": { color: "d876e3", description: "Question / support" },
+              "type/docs": { color: "0075ca", description: "Documentation" },
+              "type/chore": { color: "cfd3d7", description: "Chore / maintenance" },
+
+              "area/backend": { color: "1d76db", description: "Backend (FastAPI/Python)" },
+              "area/frontend": { color: "a2eeef", description: "Frontend (Vue/TS)" },
+              "area/docs": { color: "0075ca", description: "Docs/README" },
+              "area/ci": { color: "5319e7", description: "CI/CD (.github)" },
+
+              "needs-info": { color: "fbca04", description: "Needs more information" },
+              "duplicate": { color: "cfd3d7", description: "Duplicate issue" },
+            };
+
+            async function ensureLabel(name, spec) {
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name });
+                return;
+              } catch (e) {
+                if (e.status !== 404) throw e;
+              }
+              try {
+                await github.rest.issues.createLabel({ owner, repo, name, ...spec });
+              } catch (e) {
+                if (e.status !== 422) throw e;
+              }
+            }
+
+            for (const [name, spec] of Object.entries(labelSpecs)) {
+              await ensureLabel(name, spec);
+            }
+
+      - name: Load prompt
+        id: prompt
+        shell: bash
+        run: |
+          {
+            echo "prompt<<'EOF'"
+            cat .github/prompts/claude-issue-auto-response.md
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude for issue response
+        uses: anthropics/claude-code-action@v1
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          allowed_non_write_users: "*"
+          prompt: ${{ steps.prompt.outputs.prompt }}
+          claude_args: "--max-turns 20 --allowedTools Bash(*)"
+          use_commit_signing: false
