@@ -1,0 +1,63 @@
+name: Stale Cleanup
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure stale label exists
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            const name = "status/stale";
+            try {
+              await github.rest.issues.getLabel({ owner, repo, name });
+              return;
+            } catch (e) {
+              if (e.status !== 404) throw e;
+            }
+            try {
+              await github.rest.issues.createLabel({
+                owner,
+                repo,
+                name,
+                color: "cfd3d7",
+                description: "Stale / inactive",
+              });
+            } catch (e) {
+              if (e.status !== 422) throw e;
+            }
+
+      - name: Mark stale issues and PRs
+        uses: actions/stale@v10
+        with:
+          repo-token: ${{ github.token }}
+          stale-issue-label: "status/stale"
+          stale-pr-label: "status/stale"
+          days-before-issue-stale: 30
+          days-before-issue-close: 7
+          days-before-pr-stale: 30
+          days-before-pr-close: -1
+          remove-stale-when-updated: true
+          exempt-issue-labels: "pinned,security"
+          exempt-pr-labels: "pinned,security"
+          stale-issue-message: |
+            该 Issue 已超过 30 天没有更新，将被标记为 stale。
+            如果仍然需要跟进，请补充信息/进展，我们会移除 stale 标签。
+          close-issue-message: |
+            该 Issue 在标记 stale 后 7 天仍未更新，现自动关闭。
+            如仍需处理，可回复补充信息，我们会重新打开或引导你创建新 Issue。
+          stale-pr-message: |
+            该 PR 已超过 30 天没有更新，将被标记为 stale。
+            如仍在推进，请补充说明或更新分支，我们会移除 stale 标签。
+

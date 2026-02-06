@@ -1,0 +1,6 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全问题 / Security
+    url: https://github.com/FutureUnreal/WhaleWhisper/security/policy
+    about: 请勿公开安全漏洞细节；使用 Security advisory（如仓库支持）或私下联系维护者。
+
