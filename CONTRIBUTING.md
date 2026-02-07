@@ -542,7 +542,7 @@ python -m compileall -q app
 python -c "from app.main import app; print('backend import: ok')"
 
 # Run unit tests (if available)
-pytest tests/
+# Run unit tests (if available; tests directory not yet created)
 ```
 
 #### Frontend Tests
