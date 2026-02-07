@@ -1,0 +1,461 @@
+name: Claude CI Auto-Fix
+
+on:
+  workflow_run:
+    workflows: ["PR Checks", "Tests"]
+    types: [completed]
+
+  workflow_dispatch:
+    inputs:
+      task_type:
+        description: 'Task type (ci-fix or sync-dev)'
+        required: true
+        default: 'ci-fix'
+        type: choice
+        options:
+          - ci-fix
+          - sync-dev
+      target_branch:
+        description: 'Target branch for sync-dev task'
+        required: false
+        default: 'dev'
+        type: string
+      source_branch:
+        description: 'Source branch for sync-dev task'
+        required: false
+        default: 'main'
+        type: string
+      release_tag:
+        description: 'Release tag that triggered sync'
+        required: false
+        type: string
+
+jobs:
+  sync-dev:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task_type == 'sync-dev'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Validate branch parameters
+        run: |
+          TARGET="${{ github.event.inputs.target_branch }}"
+          SOURCE="${{ github.event.inputs.source_branch }}"
+
+          if [[ "$TARGET" != "dev" ]]; then
+            echo "::error::Security: Only 'dev' branch is allowed as target. Got: $TARGET"
+            exit 1
+          fi
+
+          if [[ "$SOURCE" != "main" ]]; then
+            echo "::error::Security: Only 'main' branch is allowed as source. Got: $SOURCE"
+            exit 1
+          fi
+
+          echo "Branch validation passed: syncing $SOURCE -> $TARGET"
+
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.target_branch }}
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Run Claude Code for Dev Sync
+        uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+
+          prompt: |
+            # Role: Git Branch Synchronization Assistant
+
+            You are a Git branch synchronization assistant for repository ${{ github.repository }}.
+
+            ---
+
+            ## Context
+
+            - **Source Branch**: ${{ github.event.inputs.source_branch }} (contains new release)
+            - **Target Branch**: ${{ github.event.inputs.target_branch }} (needs to be synced)
+            - **Release Tag**: ${{ github.event.inputs.release_tag }}
+
+            ---
+
+            ## Core Principles
+
+            1. **PRESERVE WORK**: Never lose commits from the target branch.
+            2. **SAFE OPERATIONS**: Use --force-with-lease, not --force.
+            3. **VERIFY BEFORE PUSH**: Always verify the result compiles and works.
+            4. **DOCUMENT CONFLICTS**: If conflicts cannot be resolved, document clearly.
+
+            ---
+
+            ## Execution Workflow
+
+            ### Phase 1: Analysis
+
+            ```bash
+            git fetch origin
+            git checkout ${{ github.event.inputs.target_branch }}
+
+            echo "=== Current branch commits ==="
+            git log --oneline -10
+
+            echo "=== Commits ahead of source ==="
+            git rev-list --count origin/${{ github.event.inputs.source_branch }}..HEAD
+
+            echo "=== Commits behind source ==="
+            git rev-list --count HEAD..origin/${{ github.event.inputs.source_branch }}
+
+            echo "=== Files that will conflict (preview) ==="
+            git diff --name-only origin/${{ github.event.inputs.source_branch }}
+            ```
+
+            ### Phase 2: Rebase Attempt
+
+            ```bash
+            git rebase origin/${{ github.event.inputs.source_branch }}
+            ```
+
+            ### Phase 3: Conflict Resolution (If Needed)
+
+            **Resolution priorities:**
+
+            | File Type | Resolution Strategy |
+            |-----------|---------------------|
+            | `VERSION` / version files | Keep source (newer release version) |
+            | `pyproject.toml` version | Keep source (newer release) |
+            | `package.json` version | Keep source (newer release) |
+            | `pnpm-lock.yaml` | Accept source, then regenerate |
+            | Database migrations | Keep both, ensure ordering |
+            | Source code | Merge intelligently, prefer target for features |
+            | Config files | Merge both changes if possible |
+
+            For each conflict:
+            1. Read the file with conflict markers
+            2. Understand what source branch changed vs target branch
+            3. Resolve and continue: `git add <file> && git rebase --continue`
+
+            ### Phase 4: Verification
+
+            ```bash
+            # Backend verification
+            if [ -d backend ]; then
+              cd backend
+              pip install -e . 2>/dev/null || true
+              python -m compileall -q app
+              python -c "from app.main import app; print('backend import: ok')"
+              cd ..
+            fi
+
+            # Frontend verification
+            if [ -d frontend ]; then
+              cd frontend
+              pnpm install --frozen-lockfile 2>/dev/null || true
+              pnpm --filter @whalewhisper/web build
+              cd ..
+            fi
+
+            git log --oneline -10
+            ```
+
+            ### Phase 5: Push
+
+            ```bash
+            git push origin ${{ github.event.inputs.target_branch }} --force-with-lease
+            ```
+
+            ---
+
+            ## Important Rules
+
+            1. **DO** preserve all feature commits from target branch
+            2. **DO** use --force-with-lease (not --force)
+            3. **DO** verify compilation before pushing
+            4. **DO** document any unresolved conflicts
+            5. **DO NOT** lose any commits
+            6. **DO NOT** push if verification fails
+            7. **DO NOT** resolve conflicts you don't understand
+
+          claude_args: "--max-turns 999 --allowedTools Read,Write,Edit,Bash(*)"
+          use_commit_signing: false
+
+  auto-fix:
+    if: |
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'failure' &&
+       !startsWith(github.event.workflow_run.head_branch, 'claude-fix-')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.task_type == 'ci-fix')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: read
+      issues: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+          fetch-depth: 0
+
+      - name: Get CI failure details
+        id: failure_details
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: ${{ github.event.workflow_run.id }}
+            });
+
+            const jobs = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: ${{ github.event.workflow_run.id }}
+            });
+
+            const failedJobs = jobs.data.jobs.filter(job => job.conclusion === 'failure');
+
+            let errorLogs = [];
+            for (const job of failedJobs) {
+              try {
+                const logs = await github.rest.actions.downloadJobLogsForWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  job_id: job.id
+                });
+                const logLines = logs.data.split('\n');
+                const relevantLogs = logLines.slice(-3000).join('\n');
+                errorLogs.push({
+                  jobName: job.name,
+                  logs: relevantLogs
+                });
+              } catch (error) {
+                console.log(`Failed to get logs for job ${job.name}: ${error.message}`);
+              }
+            }
+
+            const pullRequests = ${{ toJSON(github.event.workflow_run.pull_requests) }};
+            const hasPR = pullRequests && pullRequests.length > 0;
+
+            return {
+              runUrl: run.data.html_url,
+              workflowName: run.data.name,
+              failedJobs: failedJobs.map(j => j.name),
+              errorLogs: errorLogs,
+              hasPR: hasPR,
+              prNumber: hasPR ? pullRequests[0].number : null,
+              headBranch: '${{ github.event.workflow_run.head_branch }}'
+            };
+
+      - name: Run Claude Code for Auto-Fix
+        uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN || secrets.GH_PAT }}
+
+          prompt: |
+            # Role: CI Failure Auto-Fix Assistant
+
+            You are a CI failure auto-fixer for repository ${{ github.repository }}. Your task is to analyze CI failures and apply safe, minimal fixes.
+
+            ---
+
+            ## Context
+
+            - **Workflow**: ${{ fromJSON(steps.failure_details.outputs.result).workflowName }}
+            - **Failed Run**: ${{ fromJSON(steps.failure_details.outputs.result).runUrl }}
+            - **Branch**: ${{ fromJSON(steps.failure_details.outputs.result).headBranch }}
+            - **Has PR**: ${{ fromJSON(steps.failure_details.outputs.result).hasPR }}
+            - **PR Number**: ${{ fromJSON(steps.failure_details.outputs.result).prNumber }}
+            - **Failed Jobs**: ${{ join(fromJSON(steps.failure_details.outputs.result).failedJobs, ', ') }}
+
+            ---
+
+            ## Error Logs
+
+            ```
+            ${{ toJSON(fromJSON(steps.failure_details.outputs.result).errorLogs) }}
+            ```
+
+            ---
+
+            ## Core Principles
+
+            1. **SAFE FIXES ONLY**: Only fix obvious, mechanical issues.
+            2. **NO BEHAVIOR CHANGES**: Never alter application logic or functionality.
+            3. **MINIMAL SCOPE**: Fix only what's broken, don't improve or refactor.
+            4. **VERIFY FIXES**: Always verify the fix resolves the issue.
+            5. **DOCUMENT UNFIXABLE**: If something can't be safely fixed, document why.
+
+            ---
+
+            ## Error Categorization
+
+            | Category | Examples | Auto-Fixable? |
+            |----------|----------|---------------|
+            | **Python: Formatting** | ruff format violations | YES - run `ruff format` |
+            | **Python: Lint** | ruff check violations (unused imports, etc.) | YES - run `ruff check --fix` |
+            | **Python: Import sort** | isort violations | YES - run `ruff check --select I --fix` |
+            | **Python: Type errors** | mypy type mismatch | NO - may alter behavior |
+            | **Python: Syntax** | SyntaxError, IndentationError | MAYBE - if obvious |
+            | **Frontend: Formatting** | Prettier violations | YES - run formatter |
+            | **Frontend: Lint** | ESLint violations (unused imports, etc.) | YES - run `pnpm run lint --fix` |
+            | **Frontend: Type errors** | TypeScript type mismatch | NO - may alter behavior |
+            | **Build: Missing dependency** | Module not found | NO - needs decision |
+            | **Test: Assertion failure** | Expected vs actual mismatch | NO - needs investigation |
+
+            ---
+
+            ## Execution Workflow
+
+            ### Phase 1: Categorize Errors
+
+            Parse error logs. For each error, record:
+            1. File path and line number
+            2. Error type and category
+            3. Whether it's auto-fixable
+            4. Specific fix required
+
+            ### Phase 2: Apply Safe Fixes
+
+            ```bash
+            # Backend auto-fixes
+            if [ -d backend ]; then
+              cd backend
+              pip install -e . 2>/dev/null || true
+              ruff check --fix . 2>/dev/null || true
+              ruff format . 2>/dev/null || true
+              cd ..
+            fi
+
+            # Frontend auto-fixes
+            if [ -d frontend ]; then
+              cd frontend
+              pnpm install --frozen-lockfile 2>/dev/null || true
+              pnpm run lint --fix 2>/dev/null || true
+              pnpm run format 2>/dev/null || true
+              cd ..
+            fi
+
+            git diff --stat
+            ```
+
+            For remaining errors needing manual fixes:
+            1. Read the file containing the error
+            2. Verify the fix is mechanical and safe
+            3. Apply minimal targeted edit
+            4. DO NOT change any logic
+
+            ### Phase 3: Verification
+
+            ```bash
+            # Backend verification
+            if [ -d backend ]; then
+              cd backend
+              python -m compileall -q app || true
+              ruff check . || true
+              cd ..
+            fi
+
+            # Frontend verification
+            if [ -d frontend ]; then
+              cd frontend
+              pnpm --filter @whalewhisper/web build || true
+              cd ..
+            fi
+
+            git diff --stat
+            git diff
+            ```
+
+            ### Phase 4: Self-Reflection
+
+            | Check | Question |
+            |-------|----------|
+            | Scope | Did I only fix CI errors, nothing else? |
+            | Safety | Could any of my changes alter behavior? |
+            | Completeness | Did I fix all the safe-to-fix errors? |
+            | Documentation | Did I document what couldn't be fixed? |
+
+            **If any behavior-altering changes were made, STOP and document instead.**
+
+            ### Phase 5: Commit & Push
+
+            **For PR (hasPR = true):**
+            ```bash
+            git checkout -b claude-fix-pr-${{ fromJSON(steps.failure_details.outputs.result).prNumber }}-${{ github.run_id }}
+            git add .
+            git commit -m "fix: auto-fix CI failures
+
+            Fixed:
+            - [List each fix applied]
+
+            Not auto-fixable (requires human review):
+            - [List errors that couldn't be safely fixed]
+
+            CI Run: ${{ fromJSON(steps.failure_details.outputs.result).runUrl }}"
+
+            git push origin claude-fix-pr-${{ fromJSON(steps.failure_details.outputs.result).prNumber }}-${{ github.run_id }}
+
+            gh pr create \
+              --base ${{ fromJSON(steps.failure_details.outputs.result).headBranch }} \
+              --title "Auto-fix CI failures for PR #${{ fromJSON(steps.failure_details.outputs.result).prNumber }}" \
+              --body "## CI Auto-Fix
+
+            **Original PR**: #${{ fromJSON(steps.failure_details.outputs.result).prNumber }}
+            **Failed CI Run**: [${{ fromJSON(steps.failure_details.outputs.result).workflowName }}](${{ fromJSON(steps.failure_details.outputs.result).runUrl }})
+
+            ### Fixes Applied
+
+            | File | Fix | Type |
+            |------|-----|------|
+            | [file] | [what was fixed] | [lint/format/etc] |
+
+            ### Not Auto-Fixable
+
+            | File | Error | Reason |
+            |------|-------|--------|
+            | [file] | [error] | [why not safe to auto-fix] |
+
+            ---
+            *Auto-generated by Claude AI*"
+            ```
+
+            **For non-PR branch (hasPR = false):**
+            ```bash
+            git add .
+            git commit -m "fix: auto-fix CI failures
+
+            Fixed:
+            - [List each fix]
+
+            CI Run: ${{ fromJSON(steps.failure_details.outputs.result).runUrl }}"
+
+            git push origin ${{ fromJSON(steps.failure_details.outputs.result).headBranch }}
+            ```
+
+            ---
+
+            ## Anti-Patterns to Avoid
+
+            | Anti-Pattern | Why It's Bad | What To Do Instead |
+            |--------------|--------------|-------------------|
+            | Fixing type errors by casting | Hides real bugs | Document for human review |
+            | Removing "unused" parameters | May break API contracts | Check usage first |
+            | Changing test assertions | Masks actual failures | Report for investigation |
+            | Bulk auto-fix without review | May introduce bugs | Review each change |
+            | Fixing errors you don't understand | May cause regressions | Document and skip |
+
+          claude_args: "--max-turns 999 --allowedTools Read,Write,Edit,Bash(*)"
+          use_commit_signing: false

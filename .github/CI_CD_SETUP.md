@@ -51,10 +51,11 @@
   - **不 checkout PR head/merge 代码**，审查基于 GitHub API 获取的 diff（避免执行不受信任代码）
   - Codex 沙箱设置为 `read-only`
 
-### 6) `Claude PR Review`（`.github/workflows/claude-pr-review.yml`）
+### 6) `Claude PR Review (Fallback)`（`.github/workflows/claude-pr-review.yml`）
 
 - **触发**：每次 PR（opened/synchronize/reopened/ready_for_review）
-- **功能**：调用 Claude 对 PR 进行自动审查并评论到 PR
+- **功能**：**Codex 优先 + Claude 兜底**。先等待 Codex PR Review 完成（最多 10 分钟），Codex 成功则跳过 Claude；Codex 失败或超时则 Claude 接手，执行 6 视角综合审查（注释分析、测试分析、静默失败猎手、类型审计、通用审查、简化器）+ 置信度评分（≥80 才报告）
+- **安全设计**：保留 API key 校验、base SHA checkout、只读工具限制
 - **说明**：需要配置 `ANTHROPIC_API_KEY`（可选 `ANTHROPIC_BASE_URL`）
 
 ### 7) `Codex Issue Triage`（`.github/workflows/codex-issue-triage.yml`）
@@ -84,6 +85,20 @@
 
 - **触发**：push tag（`v*`）
 - **功能**：自动创建 GitHub Release（使用 GitHub 自动生成的 Release Notes）
+
+### 12) `Claude CI Auto-Fix`（`.github/workflows/claude-ci-autofix.yml`）
+
+- **触发**：`PR Checks` 或 `Tests` 工作流失败时自动触发；也支持手动触发（ci-fix / sync-dev）
+- **功能**：
+  - **ci-fix 模式**：分析 CI 失败日志，自动修复安全的机械性问题（格式化、lint、未使用 import 等），对不安全的错误只记录不修改，然后创建修复 PR
+  - **sync-dev 模式**：Release 后自动将 main 分支 rebase 同步到 dev 分支，智能解决冲突
+- **说明**：需要配置 `ANTHROPIC_API_KEY`；sync-dev 模式还需要 `GH_PAT`（用于推送到受保护分支）
+
+### 13) `Claude PR Review Responder`（`.github/workflows/claude-review-responder.yml`）
+
+- **触发**：PR Review 提交时（`changes_requested` 或 review body 包含 `@claude`）
+- **功能**：自动分析 Reviewer 的反馈，分类为 Must Fix / Should Fix / Consider / Question，对安全可实现的修改自动提交 commit，并发表结构化回复
+- **说明**：需要配置 `ANTHROPIC_API_KEY`
 
 ---
 
