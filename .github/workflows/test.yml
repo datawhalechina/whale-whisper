@@ -14,41 +14,75 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+
+      - name: Detect backend
+        id: detect
+        run: |
+          if [ -f backend/pyproject.toml ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip backend checks (no backend/)
+        if: steps.detect.outputs.exists != 'true'
+        run: echo "No backend/ found; skipping backend checks."
+
       - name: Setup Python
+        if: steps.detect.outputs.exists == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
           cache-dependency-path: backend/pyproject.toml
       - name: Install backend (editable)
+        if: steps.detect.outputs.exists == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -e backend
       - name: Backend syntax check (compileall)
+        if: steps.detect.outputs.exists == 'true'
         run: python -m compileall -q backend/app
       - name: Backend import smoke test
+        if: steps.detect.outputs.exists == 'true'
         run: python -c "from app.main import app; print('backend app import: ok')"
 
   frontend:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
     steps:
       - uses: actions/checkout@v5
+
+      - name: Detect frontend
+        id: detect
+        run: |
+          if [ -f frontend/pnpm-lock.yaml ] || [ -f frontend/package.json ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip frontend checks (no frontend/)
+        if: steps.detect.outputs.exists != 'true'
+        run: echo "No frontend/ found; skipping frontend checks."
+
       - name: Setup Node.js
+        if: steps.detect.outputs.exists == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "pnpm"
           cache-dependency-path: frontend/pnpm-lock.yaml
       - name: Setup pnpm
+        if: steps.detect.outputs.exists == 'true'
         uses: pnpm/action-setup@v4
         with:
           version: "9.12.2"
           run_install: false
       - name: Install dependencies
+        if: steps.detect.outputs.exists == 'true'
+        working-directory: frontend
         run: pnpm install --frozen-lockfile
       - name: Build web app
+        if: steps.detect.outputs.exists == 'true'
+        working-directory: frontend
         run: pnpm --filter @whalewhisper/web build
-

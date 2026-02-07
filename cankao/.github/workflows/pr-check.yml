@@ -1,0 +1,97 @@
+name: PR Build Check
+
+# 在向 main 或 dev 分支提交 PR 时触发
+on:
+  pull_request:
+    branches:
+      - main # 稳定版本分支
+      - dev # 开发版本分支
+    types: [opened, synchronize, reopened]
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: ding113/claude-code-hub
+
+jobs:
+  # 代码质量检查任务
+  code-quality:
+    runs-on: ubuntu-latest
+    name: Code Quality Check
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v5
+
+      - name: 📦 Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 📦 Install dependencies
+        run: bun install
+
+      - name: 🔍 Type check
+        run: bun run typecheck
+
+      - name: 🎨 Format check
+        run: bun run format:check
+
+      - name: 🛡️ Validate migrations
+        run: bun run validate:migrations
+
+      - name: Code quality checks passed
+        run: |
+          echo "All code quality checks passed!"
+          echo "📝 Type checking: OK"
+          echo "🎨 Code formatting: OK"
+          echo "🛡️ Migration validation: OK"
+
+  # PR 构建测试任务（不推送镜像）
+  build-check:
+    runs-on: ubuntu-latest
+    name: Docker Build Test
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v5
+
+      - name: 🔧 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 📋 Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=pr
+            type=sha,prefix=pr-
+
+      - name: 🏗️ Build Docker image (Test Only - No Push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./deploy/Dockerfile
+          platforms: linux/amd64 # PR检查使用单一架构提高速度
+          push: false # 永远不推送，仅测试构建
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build check passed
+        run: |
+          echo "Docker image build successful!"
+          echo "📦 Image tags that would be used: ${{ steps.meta.outputs.tags }}"
+          echo "🔍 All checks passed - PR is ready for review"
+
+      # 如果构建失败，这个步骤会提供更详细的信息
+      - name: ❌ Build failed diagnostics
+        if: failure()
+        run: |
+          echo "❌ Build or test failed!"
+          echo "Please check the logs above for details."
+          docker images

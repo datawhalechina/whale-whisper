@@ -23,6 +23,20 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Compute Responses API endpoint override (optional)
+        id: responses_endpoint
+        shell: bash
+        run: |
+          base="${{ secrets.OPENAI_BASE_URL }}"
+          base="${base%/}"
+          if [ -z "$base" ]; then
+            echo "endpoint=" >> "$GITHUB_OUTPUT"
+          elif [[ "$base" == */responses ]]; then
+            echo "endpoint=$base" >> "$GITHUB_OUTPUT"
+          else
+            echo "endpoint=$base/responses" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run Codex triage
         id: run_codex
         uses: openai/codex-action@v1
@@ -33,7 +47,8 @@ jobs:
           ISSUE_REPO: ${{ github.repository }}
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          responses-api-endpoint: ${{ secrets.OPENAI_BASE_URL || 'https://api.openai.com/v1' }}
+          # NOTE: openai/codex-action expects a full Responses endpoint (…/v1/responses).
+          responses-api-endpoint: ${{ steps.responses_endpoint.outputs.endpoint }}
           model: ${{ vars.OPENAI_MODEL || 'gpt-5.2' }}
           effort: ${{ vars.OPENAI_EFFORT || 'medium' }}
           sandbox: read-only
@@ -150,4 +165,3 @@ jobs:
                 await github.rest.issues.createComment({ owner, repo, issue_number, body });
               }
             }
-
