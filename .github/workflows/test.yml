@@ -66,8 +66,6 @@ jobs:
         if: steps.detect.outputs.exists != 'true'
         run: echo "No frontend/ found; skipping frontend checks."
 
-      - name: Setup Node.js
-        if: steps.detect.outputs.exists == 'true'
       - name: Setup pnpm
         if: steps.detect.outputs.exists == 'true'
         uses: pnpm/action-setup@v4
