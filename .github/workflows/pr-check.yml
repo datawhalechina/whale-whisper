@@ -28,7 +28,8 @@ jobs:
       - name: Backend syntax check (compileall)
         run: python -m compileall -q backend/app
       - name: Backend import smoke test
-        run: python -c "from app.main import app; print('backend app import: ok')"
+        run: |
+          python -c "from app.main import app; print('backend app import: ok')"
 
   frontend:
     if: github.event.pull_request.draft == false
@@ -38,17 +39,17 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v5
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "9.12.2"
+          run_install: false
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "pnpm"
           cache-dependency-path: frontend/pnpm-lock.yaml
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: "9.12.2"
-          run_install: false
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Build web app

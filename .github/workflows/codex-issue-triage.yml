@@ -7,8 +7,7 @@ on:
 jobs:
   triage:
     if: |
-      !endsWith(github.actor, '[bot]') &&
-      secrets.OPENAI_API_KEY != ''
+      !endsWith(github.actor, '[bot]')
     runs-on: ubuntu-latest
     concurrency:
       group: ${{ github.workflow }}-${{ github.event.issue.number }}
@@ -18,12 +17,18 @@ jobs:
       issues: write
 
     steps:
+      - name: Skip (missing OPENAI_API_KEY)
+        if: ${{ secrets.OPENAI_API_KEY == '' }}
+        run: echo "OPENAI_API_KEY is not configured; skipping issue triage."
+
       - name: Checkout repository (for docs context)
+        if: ${{ secrets.OPENAI_API_KEY != '' }}
         uses: actions/checkout@v5
         with:
           fetch-depth: 1
 
       - name: Compute Responses API endpoint override (optional)
+        if: ${{ secrets.OPENAI_API_KEY != '' }}
         id: responses_endpoint
         shell: bash
         run: |
@@ -38,6 +43,7 @@ jobs:
           fi
 
       - name: Run Codex triage
+        if: ${{ secrets.OPENAI_API_KEY != '' }}
         id: run_codex
         uses: openai/codex-action@v1
         env:
@@ -56,7 +62,7 @@ jobs:
           prompt-file: .github/prompts/codex-issue-triage.md
 
       - name: Apply labels and upsert comment
-        if: steps.run_codex.outputs.final-message != ''
+        if: ${{ secrets.OPENAI_API_KEY != '' && steps.run_codex.outputs.final-message != '' }}
         uses: actions/github-script@v7
         env:
           TRIAGE_JSON: ${{ steps.run_codex.outputs.final-message }}
