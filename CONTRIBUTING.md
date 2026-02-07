@@ -223,7 +223,7 @@ python -m compileall -q app
 python -c "from app.main import app; print('backend import: ok')"
 
 # 运行单元测试（如果有）
-pytest tests/
+# Run unit tests (if available; tests directory not yet created)
 ```
 
 #### 前端测试
