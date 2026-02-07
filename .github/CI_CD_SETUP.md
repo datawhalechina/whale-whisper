@@ -10,6 +10,10 @@
 
 ## ✅ 工作流一览
 
+> 说明：本仓库有多条工作流使用 `pull_request_target`（PR Labels、Codex/Claude PR Review、Codex PR Description）。
+> GitHub 在 **2025-12-08** 起调整行为：`pull_request_target` 会始终从仓库的 **Default branch** 读取/执行 workflow。
+> 因此要修改这些 workflow，必须把改动合进默认分支（当前是 `main`），否则 PR 上跑的仍是默认分支里的旧版本。
+
 ### 1) `PR Checks`（`.github/workflows/pr-check.yml`）
 
 - **触发**：向 `main` 或 `dev` 提交 PR 时（opened/synchronize/reopened/ready_for_review）
@@ -17,6 +21,8 @@
   - 后端：安装依赖 + 编译检查 + import smoke test
   - 前端：pnpm workspace 安装依赖并构建 Web（`@whalewhisper/web build`）
 - **用途**：作为合并前质量门禁（建议在分支保护中设为 Required）
+
+> 说明：如仓库里暂时没有 `backend/` 或 `frontend/`，对应 job 会输出 “skip” 提示并正常通过（便于把本仓库当作工作流测试仓库使用）。
 
 ### 2) `Test Suite`（`.github/workflows/test.yml`）
 
@@ -45,10 +51,10 @@
   - **不 checkout PR head/merge 代码**，审查基于 GitHub API 获取的 diff（避免执行不受信任代码）
   - Codex 沙箱设置为 `read-only`
 
-### 6) `Claude PR Review (Fallback)`（`.github/workflows/claude-pr-review.yml`）
+### 6) `Claude PR Review`（`.github/workflows/claude-pr-review.yml`）
 
 - **触发**：每次 PR（opened/synchronize/reopened/ready_for_review）
-- **功能**：当 Codex 没跑（或失败/超时）时，用 Claude 作为兜底审查
+- **功能**：调用 Claude 对 PR 进行自动审查并评论到 PR
 - **说明**：需要配置 `ANTHROPIC_API_KEY`（可选 `ANTHROPIC_BASE_URL`）
 
 ### 7) `Codex Issue Triage`（`.github/workflows/codex-issue-triage.yml`）
@@ -88,11 +94,11 @@
 ### Secrets（必需）
 
 - `OPENAI_API_KEY`：Codex 审查/PR说明/Issue分诊必需
+- `ANTHROPIC_API_KEY`：Claude PR 审查/Issue 自动回复/重复检测必需
 
 ### Secrets（可选）
 
-- `OPENAI_BASE_URL`：如使用 OpenAI 兼容网关/自建网关，可填 base url（默认走 `https://api.openai.com/v1`）
-- `ANTHROPIC_API_KEY`：启用 Claude fallback 必需
+- `OPENAI_BASE_URL`：如使用 OpenAI 兼容网关/自建网关，可填网关地址（推荐填到 `/v1` 或完整的 `/v1/responses`；workflow 会自动补全 `/responses`）。不填则使用 `openai/codex-action` 内置默认端点。
 - `ANTHROPIC_BASE_URL`：如使用 Anthropic 兼容网关/自建网关，可填 base url
 
 ### Variables（可选）
@@ -100,7 +106,13 @@
 - `OPENAI_MODEL`：默认 `gpt-5.2`
 - `OPENAI_EFFORT`：默认 `high`（成本/耗时更敏感可用 `medium`）
 
-> 没配 `OPENAI_API_KEY` 时：`Codex PR Review` 会被跳过；`PR Checks` 不受影响。
+> 没配 `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` 时：对应 AI 工作流会直接失败（用于把 AI 检查设为 Required 时“没配 key 就挡住合并”）。
+
+### Actions 设置（必需）
+
+Settings → Actions → General → Workflow permissions：
+
+- 选择 **Read and write permissions**（否则自动打标签/写 PR 描述/评论会 403）
 
 ---
 
@@ -113,6 +125,8 @@ Settings → Branches → Add rule
 - [x] Require a pull request before merging
 - [x] Require status checks to pass before merging
   - 勾选：`PR Checks / backend`、`PR Checks / frontend`
+  - 如要把 AI 也设为门禁，再勾选：`Codex PR Review / pr-review`、`Claude PR Review / pr-review`
+  - （可选）如希望 PR 描述也必须自动生成，再勾选：`Codex PR Description / pr-description`
 - [x] Require branches to be up to date before merging（可选，但推荐）
 - [ ] Require approvals（可选：建议 1）
 
@@ -121,9 +135,13 @@ Settings → Branches → Add rule
 - [x] Require a pull request before merging
 - [x] Require status checks to pass before merging
   - 勾选：`PR Checks / backend`、`PR Checks / frontend`
+  - 如要把 AI 也设为门禁，再勾选：`Codex PR Review / pr-review`、`Claude PR Review / pr-review`
+  - （可选）如希望 PR 描述也必须自动生成，再勾选：`Codex PR Description / pr-description`
 - [x] Include administrators（推荐）
 - [x] Require approvals（推荐：1-2）
 - [x] Require conversation resolution before merging（推荐）
+
+> 如果在 ruleset 里搜不到某个 check 名称：先创建一个 PR 让对应 workflow 跑一次，再回来 Add checks。
 
 ---
 

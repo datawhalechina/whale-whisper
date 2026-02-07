@@ -1,84 +1,29 @@
-name: Claude PR Review (Fallback)
+name: Claude PR Review
 
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
 
 jobs:
-  decide:
-    if: |
-      github.event.pull_request.draft == false &&
-      !endsWith(github.actor, '[bot]') &&
-      secrets.ANTHROPIC_API_KEY != ''
-    runs-on: ubuntu-latest
-    outputs:
-      should_run: ${{ steps.check.outputs.should_run }}
-    steps:
-      - name: Check Codex PR Review result
-        id: check
-        uses: actions/github-script@v7
-        env:
-          HAS_OPENAI_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            const hasOpenAI = process.env.HAS_OPENAI_KEY === "true";
-            const { owner, repo } = context.repo;
-            const prNumber = context.payload.pull_request.number;
-
-            // If Codex can't run, always run Claude as fallback.
-            if (!hasOpenAI) {
-              core.setOutput("should_run", "true");
-              return;
-            }
-
-            const workflow_id = "codex-pr-review.yml";
-            const maxWaitMs = 10 * 60 * 1000;
-            const intervalMs = 30 * 1000;
-            const start = Date.now();
-
-            function sleep(ms) {
-              return new Promise((r) => setTimeout(r, ms));
-            }
-
-            while (Date.now() - start < maxWaitMs) {
-              const runs = await github.rest.actions.listWorkflowRuns({
-                owner,
-                repo,
-                workflow_id,
-                per_page: 20,
-              });
-
-              const matching = runs.data.workflow_runs
-                .filter((run) => (run.pull_requests || []).some((pr) => pr.number === prNumber))
-                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
-
-              if (matching) {
-                if (matching.status === "completed") {
-                  core.setOutput("should_run", matching.conclusion === "success" ? "false" : "true");
-                  return;
-                }
-              }
-
-              await sleep(intervalMs);
-            }
-
-            // Timeout: run Claude to avoid missing a review.
-            core.setOutput("should_run", "true");
-
   pr-review:
-    needs: decide
-    if: needs.decide.outputs.should_run == 'true'
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
       group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
+      cancel-in-progress: true
     permissions:
       contents: read
       pull-requests: write
 
     steps:
+      - name: Validate Anthropic configuration
+        run: |
+          if [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+            echo "::error::Missing required secret ANTHROPIC_API_KEY (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+
       - name: Checkout base (safe)
         uses: actions/checkout@v5
         with:
@@ -120,4 +65,3 @@ jobs:
             Post a review comment on the PR with:
             - Summary (2-4 bullets)
             - Findings (prioritized, each with suggested fix)
-

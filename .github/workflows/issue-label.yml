@@ -1,0 +1,204 @@
+name: Issue Labels
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  label:
+    if: "!endsWith(github.actor, '[bot]')"
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+
+    steps:
+      - name: Apply labels based on content
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const { owner, repo } = context.repo;
+            const issueNumber = context.payload.issue.number;
+
+            const labelSpecs = {
+              "type/bug": { color: "d73a4a", description: "Bug / 缺陷" },
+              "type/feature": { color: "0e8a16", description: "Feature request / 功能请求" },
+              "type/question": { color: "d876e3", description: "Question / 疑问" },
+              "type/docs": { color: "0075ca", description: "Documentation / 文档" },
+
+              "area/backend": { color: "1d76db", description: "Backend (FastAPI/Python)" },
+              "area/frontend": { color: "a2eeef", description: "Frontend (Vue/TS)" },
+              "area/ci": { color: "5319e7", description: "CI/CD (.github)" },
+              "area/docs": { color: "0075ca", description: "Documentation" },
+
+              "priority/high": { color: "d73a4a", description: "High priority / 高优先级" },
+              "priority/medium": { color: "fbca04", description: "Medium priority / 中优先级" },
+              "priority/low": { color: "0e8a16", description: "Low priority / 低优先级" },
+            };
+
+            async function ensureLabel(name) {
+              const spec = labelSpecs[name] || { color: "cfd3d7", description: "" };
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name });
+                return;
+              } catch (e) {
+                if (e.status !== 404) throw e;
+              }
+              try {
+                await github.rest.issues.createLabel({
+                  owner,
+                  repo,
+                  name,
+                  color: spec.color,
+                  description: spec.description,
+                });
+              } catch (e) {
+                if (e.status !== 422) throw e;
+              }
+            }
+
+            const issue = context.payload.issue;
+            const title = (issue.title || "").toLowerCase();
+            const body = (issue.body || "").toLowerCase();
+            const content = title + "\n" + body;
+
+            const desired = new Set();
+
+            // Type detection
+            if (
+              title.includes("[bug]") ||
+              content.includes("bug") ||
+              content.includes("错误") ||
+              content.includes("报错") ||
+              content.includes("崩溃") ||
+              content.includes("crash") ||
+              content.includes("error") ||
+              content.includes("问题")
+            ) {
+              desired.add("type/bug");
+            }
+
+            if (
+              title.includes("[feature]") ||
+              content.includes("feature") ||
+              content.includes("功能") ||
+              content.includes("需求") ||
+              content.includes("建议") ||
+              content.includes("希望") ||
+              content.includes("能否") ||
+              content.includes("可以增加")
+            ) {
+              desired.add("type/feature");
+            }
+
+            if (
+              title.includes("[question]") ||
+              title.includes("?") ||
+              title.includes("？") ||
+              content.includes("how to") ||
+              content.includes("怎么") ||
+              content.includes("如何") ||
+              content.includes("为什么") ||
+              content.includes("what is") ||
+              content.includes("是什么")
+            ) {
+              desired.add("type/question");
+            }
+
+            if (
+              content.includes("docs") ||
+              content.includes("documentation") ||
+              content.includes("readme") ||
+              content.includes("文档")
+            ) {
+              desired.add("type/docs");
+            }
+
+            // Area detection
+            if (
+              content.includes("backend") ||
+              content.includes("后端") ||
+              content.includes("fastapi") ||
+              content.includes("python") ||
+              content.includes("api")
+            ) {
+              desired.add("area/backend");
+            }
+
+            if (
+              content.includes("frontend") ||
+              content.includes("前端") ||
+              content.includes("vue") ||
+              content.includes("ui") ||
+              content.includes("页面") ||
+              content.includes("界面")
+            ) {
+              desired.add("area/frontend");
+            }
+
+            if (
+              content.includes("ci") ||
+              content.includes("workflow") ||
+              content.includes("github actions") ||
+              content.includes("构建") ||
+              content.includes("部署")
+            ) {
+              desired.add("area/ci");
+            }
+
+            if (
+              content.includes("readme") ||
+              content.includes("文档") ||
+              content.includes("documentation")
+            ) {
+              desired.add("area/docs");
+            }
+
+            // Priority detection
+            if (
+              content.includes("urgent") ||
+              content.includes("紧急") ||
+              content.includes("critical") ||
+              content.includes("严重") ||
+              content.includes("crash") ||
+              content.includes("崩溃") ||
+              content.includes("无法使用") ||
+              content.includes("不能用")
+            ) {
+              desired.add("priority/high");
+            } else if (
+              content.includes("minor") ||
+              content.includes("small") ||
+              content.includes("轻微") ||
+              content.includes("小问题")
+            ) {
+              desired.add("priority/low");
+            }
+
+            // Default to at least one type label if none detected
+            if (![...desired].some(l => l.startsWith("type/"))) {
+              desired.add("type/question");
+            }
+
+            // Ensure all labels exist
+            for (const name of desired) {
+              await ensureLabel(name);
+            }
+
+            // Get current labels
+            const currentLabels = await github.paginate(github.rest.issues.listLabelsOnIssue, {
+              owner,
+              repo,
+              issue_number: issueNumber,
+              per_page: 100,
+            });
+            const currentNames = currentLabels.map((l) => l.name);
+
+            // Add missing labels
+            const toAdd = [...desired].filter((n) => !currentNames.includes(n));
+            if (toAdd.length) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number: issueNumber, labels: toAdd });
+              console.log(`Added labels: ${toAdd.join(", ")}`);
+            } else {
+              console.log("No new labels to add");
+            }
