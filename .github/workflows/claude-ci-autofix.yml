@@ -2,7 +2,7 @@ name: Claude CI Auto-Fix
 
 on:
   workflow_run:
-    workflows: ["PR Checks", "Tests"]
+    workflows: ["PR Checks", "Test Suite"]
     types: [completed]
 
   workflow_dispatch:
@@ -189,6 +189,8 @@ jobs:
     if: |
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'failure' &&
+       github.event.workflow_run.event == 'pull_request' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
        !startsWith(github.event.workflow_run.head_branch, 'claude-fix-')) ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.task_type == 'ci-fix')
     runs-on: ubuntu-latest
@@ -204,6 +206,14 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_branch }}
           fetch-depth: 0
+
+      - name: Fetch failed logs
+        id: failed_logs
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
+        run: |
+          gh run view ${{ github.event.workflow_run.id }} --log-failed > failed.log 2>/dev/null || echo "Failed to fetch logs" > failed.log
+          echo "log_path=failed.log" >> "$GITHUB_OUTPUT"
 
       - name: Get CI failure details
         id: failure_details
@@ -224,25 +234,6 @@ jobs:
 
             const failedJobs = jobs.data.jobs.filter(job => job.conclusion === 'failure');
 
-            let errorLogs = [];
-            for (const job of failedJobs) {
-              try {
-                const logs = await github.rest.actions.downloadJobLogsForWorkflowRun({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  job_id: job.id
-                });
-                const logLines = logs.data.split('\n');
-                const relevantLogs = logLines.slice(-3000).join('\n');
-                errorLogs.push({
-                  jobName: job.name,
-                  logs: relevantLogs
-                });
-              } catch (error) {
-                console.log(`Failed to get logs for job ${job.name}: ${error.message}`);
-              }
-            }
-
             const pullRequests = ${{ toJSON(github.event.workflow_run.pull_requests) }};
             const hasPR = pullRequests && pullRequests.length > 0;
 
@@ -250,7 +241,6 @@ jobs:
               runUrl: run.data.html_url,
               workflowName: run.data.name,
               failedJobs: failedJobs.map(j => j.name),
-              errorLogs: errorLogs,
               hasPR: hasPR,
               prNumber: hasPR ? pullRequests[0].number : null,
               headBranch: '${{ github.event.workflow_run.head_branch }}'
@@ -262,7 +252,7 @@ jobs:
           ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ secrets.GITHUB_TOKEN || secrets.GH_PAT }}
+          github_token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
 
           prompt: |
             # Role: CI Failure Auto-Fix Assistant
@@ -284,9 +274,7 @@ jobs:
 
             ## Error Logs
 
-            ```
-            ${{ toJSON(fromJSON(steps.failure_details.outputs.result).errorLogs) }}
-            ```
+            Read the CI failure logs from the file `failed.log` in the workspace root. This file contains the output from the failed CI jobs.
 
             ---
 
