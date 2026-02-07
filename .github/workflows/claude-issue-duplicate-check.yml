@@ -7,8 +7,7 @@ on:
 jobs:
   check-duplicate:
     if: |
-      !endsWith(github.actor, '[bot]') &&
-      secrets.ANTHROPIC_API_KEY != ''
+      !endsWith(github.actor, '[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
@@ -19,12 +18,18 @@ jobs:
       issues: write
 
     steps:
+      - name: Skip (missing ANTHROPIC_API_KEY)
+        if: ${{ secrets.ANTHROPIC_API_KEY == '' }}
+        run: echo "ANTHROPIC_API_KEY is not configured; skipping duplicate check."
+
       - name: Checkout repository
+        if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
         uses: actions/checkout@v5
         with:
           fetch-depth: 1
 
       - name: Ensure duplicate label exists
+        if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
         uses: actions/github-script@v7
         with:
           github-token: ${{ github.token }}
@@ -50,6 +55,7 @@ jobs:
             }
 
       - name: Load prompt
+        if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
         id: prompt
         shell: bash
         run: |
@@ -60,6 +66,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Run Claude duplicate check
+        if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
         uses: anthropics/claude-code-action@v1
         env:
           ISSUE_NUMBER: ${{ github.event.issue.number }}

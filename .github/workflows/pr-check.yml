@@ -28,7 +28,8 @@ jobs:
       - name: Backend syntax check (compileall)
         run: python -m compileall -q backend/app
       - name: Backend import smoke test
-        run: python -c "from app.main import app; print('backend app import: ok')"
+        run: |
+          python -c "from app.main import app; print('backend app import: ok')"
 
   frontend:
     if: github.event.pull_request.draft == false
