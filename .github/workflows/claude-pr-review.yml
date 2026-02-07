@@ -1,4 +1,4 @@
-name: Claude PR Review (Fallback)
+name: Claude PR Review
 
 on:
   pull_request_target:
