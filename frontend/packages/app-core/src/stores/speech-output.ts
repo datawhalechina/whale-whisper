@@ -14,7 +14,6 @@ type VoiceOption = {
 
 export const useSpeechOutputStore = defineStore("speech-output", () => {
   const enabled = useLocalStorage("whalewhisper/audio/tts/enabled", false);
-  const voiceId = useLocalStorage("whalewhisper/audio/tts/voice", "");
   const rate = useLocalStorage("whalewhisper/audio/tts/rate", 1);
   const pitch = useLocalStorage("whalewhisper/audio/tts/pitch", 1);
   const volume = useLocalStorage("whalewhisper/audio/tts/volume", 1);
@@ -59,16 +58,95 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
     }
     return remoteVoices.value;
   });
-  const resolvedVoiceId = computed(() => voiceId.value || providerConfig.value?.voice || "");
+  const resolvedVoiceId = computed(() => providerConfig.value?.voice || "");
   const audioElement = ref<HTMLAudioElement | null>(null);
   const lastError = ref<string | null>(null);
   let remoteController: AbortController | null = null;
   let streamController: AbortController | null = null;
+  let requestQueueTail: Promise<void> = Promise.resolve();
   let activeObjectUrl: string | null = null;
   let audioContext: AudioContext | null = null;
   let gainNode: GainNode | null = null;
   let activeSources: AudioBufferSourceNode[] = [];
   let scheduledTime = 0;
+
+  async function requestTtsSerial(params: Parameters<typeof requestTts>[0]) {
+    const previous = requestQueueTail;
+    let release: (() => void) | null = null;
+    requestQueueTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    await previous;
+    try {
+      if (params.signal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+      return await requestTts(params);
+    } finally {
+      release?.();
+    }
+  }
+
+  function isRetriableTtsError(error: unknown) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return false;
+    }
+    if (!(error instanceof Error)) {
+      return false;
+    }
+    const status = Number((error as Error & { status?: number }).status);
+    if (status === 502 || status === 503 || status === 504 || status === 429) {
+      return true;
+    }
+    const message = error.message.toLowerCase();
+    return (
+      message.includes("bad gateway") ||
+      message.includes("gateway timeout") ||
+      message.includes("failed to fetch") ||
+      message.includes("networkerror") ||
+      message.includes("502")
+    );
+  }
+
+  async function sleep(ms: number, signal?: AbortSignal) {
+    if (!ms) return;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        cleanup();
+        resolve();
+      }, ms);
+      const onAbort = () => {
+        cleanup();
+        reject(new DOMException("Aborted", "AbortError"));
+      };
+      const cleanup = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+      };
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
+  async function requestTtsWithRetry(params: Parameters<typeof requestTts>[0]) {
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await requestTtsSerial(params);
+      } catch (error) {
+        const shouldRetry = attempt < maxAttempts && isRetriableTtsError(error);
+        if (!shouldRetry) {
+          throw error;
+        }
+        await sleep(180 * attempt, params.signal);
+      }
+    }
+    throw new Error("TTS request failed.");
+  }
 
   function refreshVoices() {
     if (!supported.value) return;
@@ -154,7 +232,7 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
       config.baseUrl = providerConfig.value.baseUrl;
     }
     let model = providerConfig.value?.model;
-    const voice = resolvedVoiceId.value || providerConfig.value?.voice;
+    const voice = resolvedVoiceId.value;
     if (model) {
       if (isAlibaba && !model.includes("/")) {
         model = `alibaba/${model}`;
@@ -177,29 +255,141 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
     return config;
   }
 
-  function splitTtsText(text: string) {
-    const hardBreaks = new Set([".", "。", "!", "！", "?", "？", "…", "\n"]);
-    const softBreaks = new Set([",", "，", ";", "；", ":", "：", "、"]);
-    const minChars = 12;
-    const maxChars = 80;
-    const chunks: string[] = [];
-    let buffer = "";
-    for (const char of text) {
-      buffer += char;
-      const isBreak = hardBreaks.has(char) || softBreaks.has(char);
-      if (buffer.length >= maxChars || (isBreak && buffer.length >= minChars)) {
-        const trimmed = buffer.trim();
-        if (trimmed) chunks.push(trimmed);
-        buffer = "";
+  const keptPunctuations = new Set(["?", "？", "!", "！"]);
+  const hardPunctuations = new Set([".", "。", "?", "？", "!", "！", "…", "⋯", "～", "~", "\n", "\t", "\r"]);
+  const softPunctuations = new Set([",", "，", "、", "–", "—", ":", "：", ";", "；", "《", "》", "「", "」"]);
+
+  type SegmentLike = { segment?: string; isWordLike?: boolean };
+  type SegmenterLike = { segment: (input: string) => Iterable<SegmentLike> };
+
+  function createSegmenter(granularity: "word" | "grapheme"): SegmenterLike | null {
+    const SegmenterCtor = (Intl as any)?.Segmenter as
+      | (new (locales?: string | string[], options?: { granularity: string }) => SegmenterLike)
+      | undefined;
+    if (!SegmenterCtor) return null;
+    try {
+      return new SegmenterCtor(undefined, { granularity });
+    } catch {
+      return null;
+    }
+  }
+
+  function splitGraphemes(text: string, segmenter: SegmenterLike | null) {
+    if (!text) return [];
+    if (!segmenter) {
+      return Array.from(text);
+    }
+    const units: string[] = [];
+    for (const token of segmenter.segment(text)) {
+      if (typeof token?.segment === "string" && token.segment.length > 0) {
+        units.push(token.segment);
       }
     }
-    const trimmed = buffer.trim();
-    if (trimmed) chunks.push(trimmed);
+    return units.length > 0 ? units : Array.from(text);
+  }
+
+  function countWordLike(text: string, segmenter: SegmenterLike | null) {
+    if (!text) return 0;
+    if (!segmenter) {
+      const matched = text.match(/[A-Za-z0-9\u4e00-\u9fff]+/g);
+      return matched?.length ?? 0;
+    }
+    let count = 0;
+    for (const token of segmenter.segment(text)) {
+      if (token?.isWordLike) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  function splitTtsText(text: string) {
+    const source = text.trim();
+    if (!source) return [];
+    const graphemeSegmenter = createSegmenter("grapheme");
+    const wordSegmenter = createSegmenter("word");
+    const input = splitGraphemes(source, graphemeSegmenter);
+    const boost = 2;
+    const minimumWords = 4;
+    const maximumWords = 12;
+    const chunks: string[] = [];
+    const emit = (value: string) => {
+      const normalized = value.trim();
+      if (normalized) {
+        chunks.push(normalized);
+      }
+    };
+
+    let yieldCount = 0;
+    let buffer = "";
+    let chunk = "";
+    let chunkWordsCount = 0;
+    let previousValue: string | undefined;
+
+    for (let i = 0; i < input.length; i++) {
+      let value = input[i];
+      if (value.length > 1) {
+        previousValue = value;
+        continue;
+      }
+
+      const hard = hardPunctuations.has(value);
+      const soft = softPunctuations.has(value);
+      const kept = keptPunctuations.has(value);
+
+      if (hard || soft) {
+        if ((value === "." || value === ",") && previousValue !== undefined && /\d/.test(previousValue)) {
+          const next = input[i + 1];
+          if (next && /\d/.test(next)) {
+            buffer += value;
+            previousValue = value;
+            continue;
+          }
+        } else if (value === "." && input[i + 1] === "." && input[i + 2] === ".") {
+          value = "…";
+          i += 2;
+        }
+
+        if (buffer.length === 0) {
+          previousValue = value;
+          continue;
+        }
+
+        const words = countWordLike(buffer, wordSegmenter);
+        if (chunkWordsCount > minimumWords && chunkWordsCount + words > maximumWords) {
+          emit(kept ? `${chunk.trim()}${value}` : chunk);
+          yieldCount += 1;
+          chunk = "";
+          chunkWordsCount = 0;
+        }
+
+        chunk += buffer + value;
+        chunkWordsCount += words;
+        buffer = "";
+
+        if (hard || chunkWordsCount > maximumWords || yieldCount < boost) {
+          emit(chunk);
+          yieldCount += 1;
+          chunk = "";
+          chunkWordsCount = 0;
+        }
+
+        previousValue = value;
+        continue;
+      }
+
+      buffer += value;
+      previousValue = value;
+    }
+
+    if (chunk.length > 0 || buffer.length > 0) {
+      emit(`${chunk}${buffer}`);
+    }
     return chunks;
   }
 
   async function fetchTtsBuffer(text: string, controller: AbortController, ctx: AudioContext) {
-    const blob = await requestTts({
+    const blob = await requestTtsWithRetry({
       baseUrl: audioApiBaseUrl.value,
       engineId: providerMetadata.value?.engineId,
       text,
@@ -229,18 +419,15 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
     const chunks = splitTtsText(text);
     if (chunks.length === 0) return;
 
-    const pending: Array<Promise<AudioBuffer>> = [];
-    let index = 0;
-    const maxInFlight = 2;
     scheduledTime = ctx.currentTime;
 
     try {
-      while (index < chunks.length || pending.length > 0) {
-        while (index < chunks.length && pending.length < maxInFlight) {
-          pending.push(fetchTtsBuffer(chunks[index], controller, ctx));
-          index += 1;
+      for (let index = 0; index < chunks.length; index++) {
+        if (index > 0) {
+          await sleep(120, controller.signal);
         }
-        const buffer = await pending.shift();
+        const chunk = chunks[index];
+        const buffer = await fetchTtsBuffer(chunk, controller, ctx);
         if (!buffer || controller.signal.aborted) return;
         const startAt = Math.max(ctx.currentTime, scheduledTime);
         const source = ctx.createBufferSource();
@@ -313,7 +500,7 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
     const controller = new AbortController();
     remoteController = controller;
     try {
-      const blob = await requestTts({
+      const blob = await requestTtsWithRetry({
         baseUrl: audioApiBaseUrl.value,
         engineId: providerMetadata.value?.engineId,
         text,
@@ -363,25 +550,6 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
   );
 
   watch(
-    () => voices.value,
-    (next) => {
-      if (useBrowserTts.value) return;
-      const voiceIds = new Set(next.map((voice) => voice.voiceURI));
-      if (voiceId.value && voiceIds.has(voiceId.value)) return;
-      const configuredVoice = providerConfig.value?.voice;
-      if (configuredVoice && voiceIds.has(configuredVoice)) {
-        voiceId.value = configuredVoice;
-        return;
-      }
-      if (next.length > 0) {
-        voiceId.value = next[0].voiceURI;
-      } else {
-        voiceId.value = "";
-      }
-    }
-  );
-
-  watch(
     () => volume.value,
     (next) => {
       if (audioElement.value) {
@@ -399,7 +567,6 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
 
   return {
     enabled,
-    voiceId,
     rate,
     pitch,
     volume,

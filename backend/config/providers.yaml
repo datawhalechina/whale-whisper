@@ -639,8 +639,7 @@ providers:
         options_source: models
       - id: voice
         label: Voice
-        type: select
-        options_source: voices
+        type: text
   - id: elevenlabs
     label: ElevenLabs
     category: speech

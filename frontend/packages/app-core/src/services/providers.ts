@@ -115,6 +115,10 @@ export async function listProviderModels(option: ProviderCatalogEntry, config: P
 }
 
 export async function listProviderVoices(option: ProviderCatalogEntry, config: ProviderConfig) {
+  if (option.id === "openai-compatible-audio-speech") {
+    return [];
+  }
+
   if (!proxyBaseUrl) {
     if (option.id === "alibaba-cloud-model-studio-speech") {
       const apiKey = config.apiKey?.trim();
@@ -122,10 +126,6 @@ export async function listProviderVoices(option: ProviderCatalogEntry, config: P
       if (!apiKey || !baseUrl) {
         return [];
       }
-      const provider = createUnAlibabaCloud(apiKey, baseUrl) as VoiceProviderWithExtraOptions<UnAlibabaCloudOptions>;
-      const voices = await listVoices({
-        ...provider.voice(),
-      });
       const configuredModel = config.model?.trim();
       const modelCandidates = new Set<string>();
       if (configuredModel) {
@@ -139,6 +139,17 @@ export async function listProviderVoices(option: ProviderCatalogEntry, config: P
           modelCandidates.add(`alibaba/${configuredModel}`);
         }
       }
+
+      const voiceQueryModel =
+        configuredModel && !configuredModel.includes("/")
+          ? `alibaba/${configuredModel}`
+          : configuredModel;
+      const provider = createUnAlibabaCloud(apiKey, baseUrl) as VoiceProviderWithExtraOptions<UnAlibabaCloudOptions>;
+      const voices = await listVoices({
+        ...(provider as any).voice(
+          voiceQueryModel ? ({ model: voiceQueryModel } as Record<string, unknown>) : undefined
+        ),
+      });
       const filtered = voices.filter((voice) => {
         const compatible = voice.compatible_models;
         if (!Array.isArray(compatible) || compatible.length === 0) {
@@ -149,7 +160,7 @@ export async function listProviderVoices(option: ProviderCatalogEntry, config: P
         }
         return compatible.some((model) => modelCandidates.has(model));
       });
-      const resolved = filtered.length ? filtered : voices;
+      const resolved = modelCandidates.size ? filtered : voices;
       return resolved.map((voice) => {
         const descriptions: string[] = [];
         if (voice.languages?.length) {

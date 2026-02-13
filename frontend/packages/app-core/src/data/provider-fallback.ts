@@ -850,8 +850,7 @@ export const fallbackProviderCatalog: ProviderCatalogEntry[] = [
       {
         "id": "voice",
         "label": "Voice",
-        "type": "select",
-        "optionsSource": "voices"
+        "type": "text"
       }
     ]
   },

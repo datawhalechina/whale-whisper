@@ -69,7 +69,13 @@ export async function requestTts(request: TtsRequest): Promise<Blob> {
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(detail || `TTS request failed: ${response.status}`);
+    const error = new Error(detail || `TTS request failed: ${response.status}`) as Error & {
+      status?: number;
+      detail?: string;
+    };
+    error.status = response.status;
+    error.detail = detail || undefined;
+    throw error;
   }
 
   return await response.blob();

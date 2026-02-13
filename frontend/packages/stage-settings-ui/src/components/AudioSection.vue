@@ -40,15 +40,12 @@ type TranscriptionState = {
 
 type SpeechOutputState = {
   enabled?: boolean;
-  voiceId?: string;
   rate?: number;
   pitch?: number;
   volume?: number;
   streaming?: boolean;
-  voices?: Array<{ voiceURI: string; name: string; lang?: string }>;
   supported?: boolean;
   lastError?: string | null;
-  refreshVoices?: () => void;
   speak?: (text: string) => void | Promise<void>;
   stop?: () => void;
 };
@@ -228,13 +225,6 @@ const ttsEnabled = computed({
     props.speechOutput.enabled = value;
   },
 });
-const voiceId = computed({
-  get: () => props.speechOutput?.voiceId ?? "",
-  set: (value: string) => {
-    if (!props.speechOutput) return;
-    props.speechOutput.voiceId = value;
-  },
-});
 const rate = computed({
   get: () => props.speechOutput?.rate ?? 1,
   set: (value: number) => {
@@ -276,14 +266,6 @@ const deviceOptions = computed<SelectOption[]>(() => {
     label: formatDeviceLabel(device),
   }));
 });
-
-const voiceOptions = computed<SelectOption[]>(() =>
-  (props.speechOutput?.voices ?? []).map((voice) => ({
-    id: voice.voiceURI,
-    label: voice.name,
-    description: voice.lang,
-  }))
-);
 
 const testText = ref("");
 const defaultTestText = computed(() =>
@@ -336,7 +318,6 @@ function toggleListening() {
 
 onMounted(() => {
   void props.hearing?.refreshDevices?.();
-  props.speechOutput?.refreshVoices?.();
   if (!testText.value) {
     testText.value = defaultTestText.value;
   }
@@ -518,14 +499,6 @@ onMounted(() => {
         </button>
       </div>
       <div class="mt-3 grid gap-2">
-        <label class="text-xs text-neutral-500 dark:text-neutral-400">
-          {{ t("audio.tts.voice") }}
-        </label>
-        <SelectMenu
-          v-model="voiceId"
-          :options="voiceOptions"
-          :placeholder="t('audio.tts.placeholder')"
-        />
         <div v-if="props.speechOutput?.supported === false" class="text-xs text-rose-500">
           {{ t("audio.tts.unsupported") }}
         </div>
