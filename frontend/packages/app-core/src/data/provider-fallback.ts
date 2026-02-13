@@ -828,6 +828,7 @@ export const fallbackProviderCatalog: ProviderCatalogEntry[] = [
     "category": "speech",
     "icon": "i-lobe-icons:openai",
     "description": "OpenAI-compatible speech.",
+    "engineId": "openai-tts",
     "fields": [
       {
         "id": "apiKey",

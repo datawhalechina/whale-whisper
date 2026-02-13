@@ -624,6 +624,7 @@ providers:
     category: speech
     icon: i-lobe-icons:openai
     description: OpenAI-compatible speech.
+    engine_id: openai-tts
     fields:
       - id: apiKey
         label: API Key
