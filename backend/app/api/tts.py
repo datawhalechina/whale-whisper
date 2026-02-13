@@ -1,3 +1,4 @@
+import json
 from typing import Any, AsyncIterator, Dict, Optional
 
 import httpx
@@ -156,6 +157,47 @@ def _audio_media_type(format_name: Optional[str]) -> str:
     return "audio/mpeg"
 
 
+def _extract_upstream_error_detail(content: bytes, reason_phrase: Optional[str]) -> str:
+    text = content.decode("utf-8", errors="ignore").strip()
+    if not text:
+        return reason_phrase or "Upstream request failed"
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return text
+    normalized = _normalize_error_value(payload)
+    return normalized or text or reason_phrase or "Upstream request failed"
+
+
+def _normalize_error_value(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        for key in ("detail", "message", "error", "msg"):
+            normalized = _normalize_error_value(value.get(key))
+            if normalized:
+                return normalized
+    if isinstance(value, list):
+        for item in value:
+            normalized = _normalize_error_value(item)
+            if normalized:
+                return normalized
+    return ""
+
+
+def _format_httpx_error_detail(exc: Exception) -> str:
+    message = str(exc).strip()
+    if message:
+        return message
+    request = getattr(exc, "request", None)
+    if request is not None:
+        method = getattr(request, "method", "REQUEST")
+        url = getattr(request, "url", "")
+        if url:
+            return f"{exc.__class__.__name__}: {method} {url}"
+    return exc.__class__.__name__
+
+
 async def _create_tts_stream(
     url: str,
     headers: Dict[str, str],
@@ -168,15 +210,15 @@ async def _create_tts_stream(
         response = await client.stream("POST", url, headers=headers, json=payload).__aenter__()
     except httpx.HTTPError as exc:
         await client.aclose()
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=_format_httpx_error_detail(exc)) from exc
 
     if response.status_code >= 400:
-        detail = await response.aread()
+        detail_bytes = await response.aread()
         await response.aclose()
         await client.aclose()
         raise HTTPException(
             status_code=response.status_code,
-            detail=detail.decode("utf-8", errors="ignore") or response.reason_phrase,
+            detail=_extract_upstream_error_detail(detail_bytes, response.reason_phrase),
         )
 
     async def iterator() -> AsyncIterator[bytes]:
@@ -201,12 +243,12 @@ async def _request_tts_bytes(
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(url, headers=headers, json=payload)
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail=_format_httpx_error_detail(exc)) from exc
 
     if response.status_code >= 400:
         raise HTTPException(
             status_code=response.status_code,
-            detail=response.text or response.reason_phrase,
+            detail=_extract_upstream_error_detail(response.content, response.reason_phrase),
         )
 
     return response.content

@@ -3,6 +3,9 @@ import { defineStore, storeToRefs } from "pinia";
 import { computed, onScopeDispose, ref, watch } from "vue";
 
 import { requestTts, resolveAudioApiBaseUrl } from "../services/audio";
+import { toSpeakableTtsChunks } from "../utils/tts-chunker";
+import { TtsStreamSegmenter } from "../utils/tts-stream-segmenter";
+import { runTtsChunkQueue } from "../utils/tts-streaming-runner";
 import { useProvidersStore } from "./providers";
 import { useSettingsStore } from "./settings";
 
@@ -69,6 +72,15 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
   let gainNode: GainNode | null = null;
   let activeSources: AudioBufferSourceNode[] = [];
   let scheduledTime = 0;
+  const assistantStreamSegmenter = new TtsStreamSegmenter();
+  const incrementalStreamingEnabled = computed(
+    () => streaming.value && !useBrowserTts.value
+  );
+  let assistantStreamActive = false;
+  let assistantStreamTaskTail: Promise<void> = Promise.resolve();
+  let assistantStreamPlaybackTail: Promise<void> = Promise.resolve();
+  let assistantStreamStartedChunks = 0;
+  let assistantStreamQueueVersion = 0;
 
   async function requestTtsSerial(params: Parameters<typeof requestTts>[0]) {
     const previous = requestQueueTail;
@@ -132,8 +144,11 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
     });
   }
 
-  async function requestTtsWithRetry(params: Parameters<typeof requestTts>[0]) {
-    const maxAttempts = 3;
+  async function requestTtsWithRetry(
+    params: Parameters<typeof requestTts>[0],
+    options?: { maxAttempts?: number }
+  ) {
+    const maxAttempts = Math.max(1, options?.maxAttempts ?? 3);
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         return await requestTtsSerial(params);
@@ -162,12 +177,13 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
     return localVoices.value.find((voice) => voice.voiceURI === resolvedVoiceId.value);
   }
 
-  function stopRemotePlayback() {
+  function stopRemotePlayback(options?: { invalidateQueue?: boolean }) {
     if (remoteController) {
       remoteController.abort();
       remoteController = null;
     }
     stopStreamingPlayback();
+    resetAssistantStreamState({ invalidateQueue: options?.invalidateQueue ?? true });
     if (audioElement.value) {
       audioElement.value.pause();
       audioElement.value.src = "";
@@ -220,6 +236,150 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
     scheduledTime = 0;
   }
 
+  function resetAssistantStreamState(options?: { invalidateQueue?: boolean }) {
+    assistantStreamActive = false;
+    assistantStreamPlaybackTail = Promise.resolve();
+    assistantStreamStartedChunks = 0;
+    assistantStreamSegmenter.reset();
+    if (options?.invalidateQueue) {
+      assistantStreamQueueVersion += 1;
+      assistantStreamTaskTail = Promise.resolve();
+    }
+  }
+
+  function queueAssistantStreamTask(task: () => Promise<void>) {
+    const version = assistantStreamQueueVersion;
+    const runIfCurrent = async () => {
+      if (version !== assistantStreamQueueVersion) return;
+      await task();
+    };
+    assistantStreamTaskTail = assistantStreamTaskTail.then(runIfCurrent, runIfCurrent);
+    return assistantStreamTaskTail;
+  }
+
+  async function ensureAssistantStreamStarted() {
+    if (!incrementalStreamingEnabled.value) return false;
+    if (!supported.value || !enabled.value) return false;
+    if (assistantStreamActive && streamController && !streamController.signal.aborted) {
+      return true;
+    }
+
+    const ctx = ensureAudioContext();
+    if (!ctx) return false;
+
+    if (ctx.state === "suspended") {
+      await ctx.resume();
+    }
+    if (gainNode) {
+      gainNode.gain.value = clampVolume(volume.value);
+    }
+
+    stopRemotePlayback({ invalidateQueue: false });
+    assistantStreamSegmenter.reset();
+    assistantStreamPlaybackTail = Promise.resolve();
+    assistantStreamStartedChunks = 0;
+    streamController = new AbortController();
+    scheduledTime = ctx.currentTime;
+    assistantStreamActive = true;
+    return true;
+  }
+
+  function scheduleAssistantChunkPlayback(chunk: string) {
+    assistantStreamPlaybackTail = assistantStreamPlaybackTail
+      .catch(() => undefined)
+      .then(async () => {
+        if (!assistantStreamActive || !streamController) return;
+        const ctx = ensureAudioContext();
+        if (!ctx || streamController.signal.aborted) return;
+
+        const buffer = await fetchTtsBuffer(chunk, streamController, ctx);
+        if (!buffer || streamController.signal.aborted) return;
+
+        const startAt = Math.max(ctx.currentTime, scheduledTime);
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        if (gainNode) {
+          source.connect(gainNode);
+        } else {
+          source.connect(ctx.destination);
+        }
+        source.start(startAt);
+        scheduledTime = startAt + buffer.duration;
+        assistantStreamStartedChunks += 1;
+        activeSources.push(source);
+        source.onended = () => {
+          activeSources = activeSources.filter((item) => item !== source);
+        };
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        console.warn("[TTS] stream chunk failed, continue with next chunk:", {
+          chunk,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+  }
+
+  function flushAssistantSegmenter(finalize: boolean) {
+    const chunks = assistantStreamSegmenter.drain(finalize);
+    if (chunks.length === 0) return;
+    chunks.forEach((chunk) => scheduleAssistantChunkPlayback(chunk));
+  }
+
+  function pushAssistantLiteral(literal: string) {
+    if (!literal) return;
+    if (!incrementalStreamingEnabled.value) return;
+    if (!supported.value || !enabled.value) return;
+    void queueAssistantStreamTask(async () => {
+      const started = await ensureAssistantStreamStarted();
+      if (!started) return;
+      assistantStreamSegmenter.appendLiteral(literal);
+      flushAssistantSegmenter(false);
+    });
+  }
+
+  function pushAssistantSpecial(_special: string) {
+    if (!incrementalStreamingEnabled.value) return;
+    if (!supported.value || !enabled.value) return;
+    void queueAssistantStreamTask(async () => {
+      const started = await ensureAssistantStreamStarted();
+      if (!started) return;
+      assistantStreamSegmenter.appendSpecialMarker();
+      flushAssistantSegmenter(false);
+    });
+  }
+
+  async function endAssistantStream(finalText?: string) {
+    if (!incrementalStreamingEnabled.value) {
+      if (finalText?.trim()) {
+        await speak(finalText);
+      }
+      return;
+    }
+
+    await queueAssistantStreamTask(async () => {
+      if (!assistantStreamActive) {
+        if (finalText?.trim()) {
+          await speak(finalText);
+        }
+        return;
+      }
+      assistantStreamSegmenter.appendFlushMarker();
+      flushAssistantSegmenter(true);
+      try {
+        await assistantStreamPlaybackTail;
+      } finally {
+        if (streamController && streamController.signal.aborted) {
+          // Keep current abort state from explicit stop/interrupt.
+        }
+        assistantStreamActive = false;
+        assistantStreamSegmenter.reset();
+        assistantStreamPlaybackTail = Promise.resolve();
+        assistantStreamStartedChunks = 0;
+      }
+    });
+  }
+
   function buildRemoteConfig() {
     const config: Record<string, unknown> = {
       ...(providerConfig.value?.extra ?? {}),
@@ -255,139 +415,6 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
     return config;
   }
 
-  const keptPunctuations = new Set(["?", "？", "!", "！"]);
-  const hardPunctuations = new Set([".", "。", "?", "？", "!", "！", "…", "⋯", "～", "~", "\n", "\t", "\r"]);
-  const softPunctuations = new Set([",", "，", "、", "–", "—", ":", "：", ";", "；", "《", "》", "「", "」"]);
-
-  type SegmentLike = { segment?: string; isWordLike?: boolean };
-  type SegmenterLike = { segment: (input: string) => Iterable<SegmentLike> };
-
-  function createSegmenter(granularity: "word" | "grapheme"): SegmenterLike | null {
-    const SegmenterCtor = (Intl as any)?.Segmenter as
-      | (new (locales?: string | string[], options?: { granularity: string }) => SegmenterLike)
-      | undefined;
-    if (!SegmenterCtor) return null;
-    try {
-      return new SegmenterCtor(undefined, { granularity });
-    } catch {
-      return null;
-    }
-  }
-
-  function splitGraphemes(text: string, segmenter: SegmenterLike | null) {
-    if (!text) return [];
-    if (!segmenter) {
-      return Array.from(text);
-    }
-    const units: string[] = [];
-    for (const token of segmenter.segment(text)) {
-      if (typeof token?.segment === "string" && token.segment.length > 0) {
-        units.push(token.segment);
-      }
-    }
-    return units.length > 0 ? units : Array.from(text);
-  }
-
-  function countWordLike(text: string, segmenter: SegmenterLike | null) {
-    if (!text) return 0;
-    if (!segmenter) {
-      const matched = text.match(/[A-Za-z0-9\u4e00-\u9fff]+/g);
-      return matched?.length ?? 0;
-    }
-    let count = 0;
-    for (const token of segmenter.segment(text)) {
-      if (token?.isWordLike) {
-        count += 1;
-      }
-    }
-    return count;
-  }
-
-  function splitTtsText(text: string) {
-    const source = text.trim();
-    if (!source) return [];
-    const graphemeSegmenter = createSegmenter("grapheme");
-    const wordSegmenter = createSegmenter("word");
-    const input = splitGraphemes(source, graphemeSegmenter);
-    const boost = 2;
-    const minimumWords = 4;
-    const maximumWords = 12;
-    const chunks: string[] = [];
-    const emit = (value: string) => {
-      const normalized = value.trim();
-      if (normalized) {
-        chunks.push(normalized);
-      }
-    };
-
-    let yieldCount = 0;
-    let buffer = "";
-    let chunk = "";
-    let chunkWordsCount = 0;
-    let previousValue: string | undefined;
-
-    for (let i = 0; i < input.length; i++) {
-      let value = input[i];
-      if (value.length > 1) {
-        previousValue = value;
-        continue;
-      }
-
-      const hard = hardPunctuations.has(value);
-      const soft = softPunctuations.has(value);
-      const kept = keptPunctuations.has(value);
-
-      if (hard || soft) {
-        if ((value === "." || value === ",") && previousValue !== undefined && /\d/.test(previousValue)) {
-          const next = input[i + 1];
-          if (next && /\d/.test(next)) {
-            buffer += value;
-            previousValue = value;
-            continue;
-          }
-        } else if (value === "." && input[i + 1] === "." && input[i + 2] === ".") {
-          value = "…";
-          i += 2;
-        }
-
-        if (buffer.length === 0) {
-          previousValue = value;
-          continue;
-        }
-
-        const words = countWordLike(buffer, wordSegmenter);
-        if (chunkWordsCount > minimumWords && chunkWordsCount + words > maximumWords) {
-          emit(kept ? `${chunk.trim()}${value}` : chunk);
-          yieldCount += 1;
-          chunk = "";
-          chunkWordsCount = 0;
-        }
-
-        chunk += buffer + value;
-        chunkWordsCount += words;
-        buffer = "";
-
-        if (hard || chunkWordsCount > maximumWords || yieldCount < boost) {
-          emit(chunk);
-          yieldCount += 1;
-          chunk = "";
-          chunkWordsCount = 0;
-        }
-
-        previousValue = value;
-        continue;
-      }
-
-      buffer += value;
-      previousValue = value;
-    }
-
-    if (chunk.length > 0 || buffer.length > 0) {
-      emit(`${chunk}${buffer}`);
-    }
-    return chunks;
-  }
-
   async function fetchTtsBuffer(text: string, controller: AbortController, ctx: AudioContext) {
     const blob = await requestTtsWithRetry({
       baseUrl: audioApiBaseUrl.value,
@@ -395,7 +422,7 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
       text,
       config: buildRemoteConfig(),
       signal: controller.signal,
-    });
+    }, { maxAttempts: 1 });
     if (controller.signal.aborted) {
       throw new DOMException("Aborted", "AbortError");
     }
@@ -416,34 +443,44 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
 
     const controller = new AbortController();
     streamController = controller;
-    const chunks = splitTtsText(text);
+    const chunks = toSpeakableTtsChunks(text);
     if (chunks.length === 0) return;
 
     scheduledTime = ctx.currentTime;
 
     try {
-      for (let index = 0; index < chunks.length; index++) {
-        if (index > 0) {
-          await sleep(120, controller.signal);
+      await runTtsChunkQueue(
+        chunks,
+        async (chunk) => {
+          if (controller.signal.aborted) return;
+          const buffer = await fetchTtsBuffer(chunk, controller, ctx);
+          if (!buffer || controller.signal.aborted) return;
+          const startAt = Math.max(ctx.currentTime, scheduledTime);
+          const source = ctx.createBufferSource();
+          source.buffer = buffer;
+          if (gainNode) {
+            source.connect(gainNode);
+          } else {
+            source.connect(ctx.destination);
+          }
+          source.start(startAt);
+          scheduledTime = startAt + buffer.duration;
+          activeSources.push(source);
+          source.onended = () => {
+            activeSources = activeSources.filter((item) => item !== source);
+          };
+        },
+        {
+          onChunkError: (error, context) => {
+            console.warn("[TTS] chunk failed, continue with next chunk:", {
+              index: context.index,
+              total: context.total,
+              chunk: context.chunk,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          },
         }
-        const chunk = chunks[index];
-        const buffer = await fetchTtsBuffer(chunk, controller, ctx);
-        if (!buffer || controller.signal.aborted) return;
-        const startAt = Math.max(ctx.currentTime, scheduledTime);
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
-        if (gainNode) {
-          source.connect(gainNode);
-        } else {
-          source.connect(ctx.destination);
-        }
-        source.start(startAt);
-        scheduledTime = startAt + buffer.duration;
-        activeSources.push(source);
-        source.onended = () => {
-          activeSources = activeSources.filter((item) => item !== source);
-        };
-      }
+      );
     } finally {
       if (streamController === controller) {
         streamController = null;
@@ -574,7 +611,11 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
     voices,
     supported,
     lastError,
+    incrementalStreamingEnabled,
     refreshVoices,
+    pushAssistantLiteral,
+    pushAssistantSpecial,
+    endAssistantStream,
     speak,
     stop,
   };
