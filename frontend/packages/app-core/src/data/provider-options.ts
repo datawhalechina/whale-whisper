@@ -312,7 +312,6 @@ export const speechProviderOptions: ProviderOption[] = [
     icon: "i-lobe-icons:openai",
     description: "OpenAI-compatible speech.",
     category: "speech",
-    engineId: "openai-tts",
     requiresApiKey: true,
     requiresBaseUrl: true,
   },
