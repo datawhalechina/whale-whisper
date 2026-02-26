@@ -1,4 +1,8 @@
 import { appConfig } from "../config";
+import {
+  buildDirectTtsHttpRequest,
+  supportsDirectTts,
+} from "../utils/tts-direct-request";
 
 type AudioRequestConfig = Record<string, unknown>;
 
@@ -34,6 +38,8 @@ export type AsrStreamConnection = {
   close: () => void;
 };
 
+export { buildDirectTtsHttpRequest, supportsDirectTts };
+
 export function resolveAudioApiBaseUrl() {
   const proxyUrl = appConfig.providers.proxyUrl?.trim();
   const apiBaseUrl = appConfig.providers.apiBaseUrl?.trim();
@@ -51,25 +57,29 @@ function resolveAudioWsBaseUrl(baseUrl?: string) {
 }
 
 export async function requestTts(request: TtsRequest): Promise<Blob> {
-  const baseUrl = request.baseUrl?.trim() || resolveAudioApiBaseUrl();
-  if (!baseUrl) {
-    throw new Error("Audio API base URL is not configured.");
+  return await requestTtsDirect(request);
+}
+
+export async function requestTtsDirect(request: TtsRequest): Promise<Blob> {
+  const directRequest = buildDirectTtsHttpRequest({
+    text: request.text,
+    engineId: request.engineId,
+    config: request.config,
+  });
+  if (!directRequest) {
+    throw new Error("Direct provider TTS request is not available for current config.");
   }
 
-  const response = await fetch(`${baseUrl}/api/tts/engines`, {
+  const response = await fetch(directRequest.url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      engine: request.engineId || "default",
-      data: { text: request.text },
-      config: request.config ?? {},
-    }),
+    headers: directRequest.headers,
+    body: JSON.stringify(directRequest.body),
     signal: request.signal,
   });
 
   if (!response.ok) {
     const detail = await response.text();
-    const error = new Error(detail || `TTS request failed: ${response.status}`) as Error & {
+    const error = new Error(detail || `Direct TTS request failed: ${response.status}`) as Error & {
       status?: number;
       detail?: string;
     };

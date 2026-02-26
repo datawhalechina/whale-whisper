@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { runTtsChunkQueue } from "./tts-streaming-runner.ts";
+import { runTtsChunkQueue, TtsChunkQueueError } from "./tts-streaming-runner.ts";
 
 async function run(name: string, fn: () => Promise<void> | void) {
   try {
@@ -51,4 +51,29 @@ await run("does not swallow AbortError", async () => {
       error instanceof DOMException &&
       error.name === "AbortError"
   );
+});
+
+await run("stops on first chunk failure when stopOnError is enabled", async () => {
+  const processed: string[] = [];
+  await assert.rejects(
+    async () => {
+      await runTtsChunkQueue(
+        ["A", "B", "C"],
+        async (chunk) => {
+          if (chunk === "B") {
+            throw new Error("B failed");
+          }
+          processed.push(chunk);
+        },
+        { stopOnError: true }
+      );
+    },
+    (error: unknown) => {
+      if (!(error instanceof TtsChunkQueueError)) return false;
+      assert.equal(error.context.index, 1);
+      assert.equal(error.context.chunk, "B");
+      return true;
+    }
+  );
+  assert.deepEqual(processed, ["A"]);
 });

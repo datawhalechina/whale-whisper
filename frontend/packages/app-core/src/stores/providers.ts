@@ -47,7 +47,10 @@ export const useProvidersStore = defineStore("providers", () => {
     "whalewhisper/providers/configs",
     {}
   );
-  const engineHealthSkipProviders = new Set(["alibaba-cloud-model-studio-speech"]);
+  const engineHealthSkipProviders = new Set([
+    "alibaba-cloud-model-studio-speech",
+    "volcengine-speech",
+  ]);
   const providerRuntime = ref<Record<string, ProviderRuntime>>({});
   const catalogProviders = ref<ProviderCatalogEntry[]>([]);
   const catalogLoading = ref(false);

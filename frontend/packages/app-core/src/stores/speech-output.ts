@@ -2,10 +2,13 @@ import { useLocalStorage } from "@vueuse/core";
 import { defineStore, storeToRefs } from "pinia";
 import { computed, onScopeDispose, ref, watch } from "vue";
 
-import { requestTts, resolveAudioApiBaseUrl } from "../services/audio";
+import {
+  requestTtsDirect,
+  supportsDirectTts,
+} from "../services/audio";
 import { toSpeakableTtsChunks } from "../utils/tts-chunker";
 import { TtsStreamSegmenter } from "../utils/tts-stream-segmenter";
-import { runTtsChunkQueue } from "../utils/tts-streaming-runner";
+import { runTtsChunkQueue, TtsChunkQueueError } from "../utils/tts-streaming-runner";
 import { useProvidersStore } from "./providers";
 import { useSettingsStore } from "./settings";
 
@@ -26,7 +29,6 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
   const settingsStore = useSettingsStore();
   const { speechProviderId } = storeToRefs(settingsStore);
   const localVoices = ref<SpeechSynthesisVoice[]>([]);
-  const audioApiBaseUrl = computed(() => resolveAudioApiBaseUrl());
   const useBrowserTts = computed(
     () => speechProviderId.value === "browser-local-audio-speech"
   );
@@ -35,7 +37,7 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
     if (useBrowserTts.value) {
       return "speechSynthesis" in window;
     }
-    return Boolean(audioApiBaseUrl.value);
+    return true;
   });
   const providerMetadata = computed(() =>
     providersStore.getProviderMetadata(speechProviderId.value)
@@ -81,8 +83,29 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
   let assistantStreamPlaybackTail: Promise<void> = Promise.resolve();
   let assistantStreamStartedChunks = 0;
   let assistantStreamQueueVersion = 0;
+  let assistantStreamChunks: string[] = [];
+  let assistantStreamFailedChunkIndex: number | null = null;
 
-  async function requestTtsSerial(params: Parameters<typeof requestTts>[0]) {
+  function resolveTtsEngineId() {
+    const metadataEngineId = providerMetadata.value?.engineId;
+    if (typeof metadataEngineId === "string" && metadataEngineId.trim()) {
+      return metadataEngineId.trim();
+    }
+    if (speechProviderId.value === "openai-audio-speech") return "openai-tts";
+    if (speechProviderId.value === "openai-compatible-audio-speech") return "openai-tts";
+    if (speechProviderId.value === "volcengine-speech" || speechProviderId.value === "volcengine") {
+      return "volcengine-speech";
+    }
+    if (
+      speechProviderId.value === "alibaba-cloud-model-studio-speech" ||
+      speechProviderId.value === "alibaba-cloud-model-studio"
+    ) {
+      return "alibaba-cloud-model-studio-speech";
+    }
+    return "";
+  }
+
+  async function requestTtsDirectSerial(params: Parameters<typeof requestTtsDirect>[0]) {
     const previous = requestQueueTail;
     let release: (() => void) | null = null;
     requestQueueTail = new Promise<void>((resolve) => {
@@ -94,7 +117,7 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
       if (params.signal?.aborted) {
         throw new DOMException("Aborted", "AbortError");
       }
-      return await requestTts(params);
+      return await requestTtsDirect(params);
     } finally {
       release?.();
     }
@@ -144,14 +167,14 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
     });
   }
 
-  async function requestTtsWithRetry(
-    params: Parameters<typeof requestTts>[0],
+  async function requestTtsDirectWithRetry(
+    params: Parameters<typeof requestTtsDirect>[0],
     options?: { maxAttempts?: number }
   ) {
-    const maxAttempts = Math.max(1, options?.maxAttempts ?? 3);
+    const maxAttempts = Math.max(1, options?.maxAttempts ?? 1);
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        return await requestTtsSerial(params);
+        return await requestTtsDirectSerial(params);
       } catch (error) {
         const shouldRetry = attempt < maxAttempts && isRetriableTtsError(error);
         if (!shouldRetry) {
@@ -160,7 +183,30 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
         await sleep(180 * attempt, params.signal);
       }
     }
-    throw new Error("TTS request failed.");
+    throw new Error("Direct TTS request failed.");
+  }
+
+  async function requestRemoteTtsBlob(
+    text: string,
+    signal: AbortSignal,
+    options?: { maxAttempts?: number }
+  ) {
+    const engineId = resolveTtsEngineId();
+    const config = buildRemoteConfig();
+
+    if (!supportsDirectTts(engineId)) {
+      throw new Error(`Direct TTS is not supported for provider: ${speechProviderId.value}`);
+    }
+
+    return await requestTtsDirectWithRetry(
+      {
+        engineId,
+        text,
+        config,
+        signal,
+      },
+      options
+    );
   }
 
   function refreshVoices() {
@@ -205,6 +251,23 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
     return Math.min(Math.max(value, 0), 1);
   }
 
+  function scheduleDecodedBuffer(ctx: AudioContext, buffer: AudioBuffer) {
+    const startAt = Math.max(ctx.currentTime, scheduledTime);
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    if (gainNode) {
+      source.connect(gainNode);
+    } else {
+      source.connect(ctx.destination);
+    }
+    source.start(startAt);
+    scheduledTime = startAt + buffer.duration;
+    activeSources.push(source);
+    source.onended = () => {
+      activeSources = activeSources.filter((item) => item !== source);
+    };
+  }
+
   function ensureAudioContext() {
     if (typeof window === "undefined") return null;
     if (!audioContext) {
@@ -240,6 +303,8 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
     assistantStreamActive = false;
     assistantStreamPlaybackTail = Promise.resolve();
     assistantStreamStartedChunks = 0;
+    assistantStreamChunks = [];
+    assistantStreamFailedChunkIndex = null;
     assistantStreamSegmenter.reset();
     if (options?.invalidateQueue) {
       assistantStreamQueueVersion += 1;
@@ -278,42 +343,45 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
     assistantStreamSegmenter.reset();
     assistantStreamPlaybackTail = Promise.resolve();
     assistantStreamStartedChunks = 0;
+    assistantStreamChunks = [];
+    assistantStreamFailedChunkIndex = null;
     streamController = new AbortController();
     scheduledTime = ctx.currentTime;
     assistantStreamActive = true;
     return true;
   }
 
-  function scheduleAssistantChunkPlayback(chunk: string) {
+  function scheduleAssistantChunkPlayback(chunk: string, chunkIndex: number) {
     assistantStreamPlaybackTail = assistantStreamPlaybackTail
       .catch(() => undefined)
       .then(async () => {
         if (!assistantStreamActive || !streamController) return;
+        if (
+          assistantStreamFailedChunkIndex !== null &&
+          chunkIndex > assistantStreamFailedChunkIndex
+        ) {
+          return;
+        }
         const ctx = ensureAudioContext();
         if (!ctx || streamController.signal.aborted) return;
 
-        const buffer = await fetchTtsBuffer(chunk, streamController, ctx);
+          const buffer = await fetchTtsBuffer(chunk, streamController, ctx, {
+            maxAttempts: 1,
+          });
         if (!buffer || streamController.signal.aborted) return;
-
-        const startAt = Math.max(ctx.currentTime, scheduledTime);
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
-        if (gainNode) {
-          source.connect(gainNode);
-        } else {
-          source.connect(ctx.destination);
-        }
-        source.start(startAt);
-        scheduledTime = startAt + buffer.duration;
+        scheduleDecodedBuffer(ctx, buffer);
         assistantStreamStartedChunks += 1;
-        activeSources.push(source);
-        source.onended = () => {
-          activeSources = activeSources.filter((item) => item !== source);
-        };
       })
       .catch((error) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
-        console.warn("[TTS] stream chunk failed, continue with next chunk:", {
+        if (
+          assistantStreamFailedChunkIndex === null ||
+          chunkIndex < assistantStreamFailedChunkIndex
+        ) {
+          assistantStreamFailedChunkIndex = chunkIndex;
+        }
+        console.warn("[TTS] stream chunk failed, defer to merged fallback:", {
+          index: chunkIndex,
           chunk,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -323,7 +391,12 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
   function flushAssistantSegmenter(finalize: boolean) {
     const chunks = assistantStreamSegmenter.drain(finalize);
     if (chunks.length === 0) return;
-    chunks.forEach((chunk) => scheduleAssistantChunkPlayback(chunk));
+    const baseIndex = assistantStreamChunks.length;
+    chunks.forEach((chunk, offset) => {
+      const chunkIndex = baseIndex + offset;
+      assistantStreamChunks.push(chunk);
+      scheduleAssistantChunkPlayback(chunk, chunkIndex);
+    });
   }
 
   function pushAssistantLiteral(literal: string) {
@@ -368,6 +441,32 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
       flushAssistantSegmenter(true);
       try {
         await assistantStreamPlaybackTail;
+        if (
+          assistantStreamFailedChunkIndex !== null &&
+          streamController &&
+          !streamController.signal.aborted
+        ) {
+          const ctx = ensureAudioContext();
+          const remainingText = assistantStreamChunks
+            .slice(assistantStreamFailedChunkIndex)
+            .join("");
+          if (ctx && remainingText.trim()) {
+            console.warn("[TTS] stream fallback to merged remainder:", {
+              failedIndex: assistantStreamFailedChunkIndex,
+              remainingChunks: assistantStreamChunks.length - assistantStreamFailedChunkIndex,
+            });
+            const fallbackBuffer = await fetchTtsBuffer(
+              remainingText,
+              streamController,
+              ctx,
+              { maxAttempts: 1 }
+            );
+            if (fallbackBuffer && !streamController.signal.aborted) {
+              scheduleDecodedBuffer(ctx, fallbackBuffer);
+              assistantStreamStartedChunks += 1;
+            }
+          }
+        }
       } finally {
         if (streamController && streamController.signal.aborted) {
           // Keep current abort state from explicit stop/interrupt.
@@ -385,6 +484,7 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
       ...(providerConfig.value?.extra ?? {}),
     };
     const isAlibaba = speechProviderId.value === "alibaba-cloud-model-studio-speech";
+    const isVolcengine = speechProviderId.value === "volcengine-speech";
     if (providerConfig.value?.apiKey) {
       config.apiKey = providerConfig.value.apiKey;
     }
@@ -396,6 +496,9 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
     if (model) {
       if (isAlibaba && !model.includes("/")) {
         model = `alibaba/${model}`;
+      }
+      if (isVolcengine && !model.includes("/")) {
+        model = `volcengine/${model}`;
       }
       config.model = model;
     }
@@ -412,17 +515,27 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
     if (isAlibaba && pitch.value && pitch.value !== 1) {
       config.pitch = pitch.value;
     }
+    if (isVolcengine) {
+      config.backend = "volcengine";
+      const appId = String(providerConfig.value?.extra?.appId ?? providerConfig.value?.extra?.appid ?? "").trim();
+      if (appId) {
+        config.appId = appId;
+        config.appid = appId;
+        config.app = { appid: appId, appId };
+      }
+    }
     return config;
   }
 
-  async function fetchTtsBuffer(text: string, controller: AbortController, ctx: AudioContext) {
-    const blob = await requestTtsWithRetry({
-      baseUrl: audioApiBaseUrl.value,
-      engineId: providerMetadata.value?.engineId,
-      text,
-      config: buildRemoteConfig(),
-      signal: controller.signal,
-    }, { maxAttempts: 1 });
+  async function fetchTtsBuffer(
+    text: string,
+    controller: AbortController,
+    ctx: AudioContext,
+    options?: { maxAttempts?: number }
+  ) {
+    const blob = await requestRemoteTtsBlob(text, controller.signal, {
+      maxAttempts: Math.max(1, options?.maxAttempts ?? 1),
+    });
     if (controller.signal.aborted) {
       throw new DOMException("Aborted", "AbortError");
     }
@@ -453,26 +566,16 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
         chunks,
         async (chunk) => {
           if (controller.signal.aborted) return;
-          const buffer = await fetchTtsBuffer(chunk, controller, ctx);
+          const buffer = await fetchTtsBuffer(chunk, controller, ctx, {
+            maxAttempts: 1,
+          });
           if (!buffer || controller.signal.aborted) return;
-          const startAt = Math.max(ctx.currentTime, scheduledTime);
-          const source = ctx.createBufferSource();
-          source.buffer = buffer;
-          if (gainNode) {
-            source.connect(gainNode);
-          } else {
-            source.connect(ctx.destination);
-          }
-          source.start(startAt);
-          scheduledTime = startAt + buffer.duration;
-          activeSources.push(source);
-          source.onended = () => {
-            activeSources = activeSources.filter((item) => item !== source);
-          };
+          scheduleDecodedBuffer(ctx, buffer);
         },
         {
+          stopOnError: true,
           onChunkError: (error, context) => {
-            console.warn("[TTS] chunk failed, continue with next chunk:", {
+            console.warn("[TTS] chunk failed:", {
               index: context.index,
               total: context.total,
               chunk: context.chunk,
@@ -481,6 +584,28 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
           },
         }
       );
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw error;
+      }
+      if (error instanceof TtsChunkQueueError) {
+        const remainingChunks = chunks.slice(error.context.index);
+        const remainingText = remainingChunks.join("");
+        if (remainingText.trim()) {
+          console.warn("[TTS] fallback to merged remainder after chunk failure:", {
+            failedIndex: error.context.index,
+            remainingChunks: remainingChunks.length,
+          });
+          const fallbackBuffer = await fetchTtsBuffer(remainingText, controller, ctx, {
+            maxAttempts: 1,
+          });
+          if (!controller.signal.aborted && fallbackBuffer) {
+            scheduleDecodedBuffer(ctx, fallbackBuffer);
+            return;
+          }
+        }
+      }
+      throw error;
     } finally {
       if (streamController === controller) {
         streamController = null;
@@ -537,13 +662,7 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
     const controller = new AbortController();
     remoteController = controller;
     try {
-      const blob = await requestTtsWithRetry({
-        baseUrl: audioApiBaseUrl.value,
-        engineId: providerMetadata.value?.engineId,
-        text,
-        config: buildRemoteConfig(),
-        signal: controller.signal,
-      });
+      const blob = await requestRemoteTtsBlob(text, controller.signal);
       if (controller.signal.aborted) return;
       const objectUrl = URL.createObjectURL(blob);
       activeObjectUrl = objectUrl;
