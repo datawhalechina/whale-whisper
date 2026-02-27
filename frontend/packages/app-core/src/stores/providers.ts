@@ -50,6 +50,7 @@ export const useProvidersStore = defineStore("providers", () => {
   const engineHealthSkipProviders = new Set([
     "alibaba-cloud-model-studio-speech",
     "volcengine-speech",
+    "aliyun-nls-transcription",
   ]);
   const providerRuntime = ref<Record<string, ProviderRuntime>>({});
   const catalogProviders = ref<ProviderCatalogEntry[]>([]);

@@ -1140,23 +1140,61 @@ export const fallbackProviderCatalog: ProviderCatalogEntry[] = [
     "category": "transcription",
     "icon": "i-lobe-icons:alibabacloud",
     "description": "Aliyun transcription.",
+    "engineId": "aliyun-nls-asr",
     "fields": [
       {
-        "id": "apiKey",
-        "label": "API Key",
+        "id": "accessKeyId",
+        "label": "Access Key ID",
         "type": "secret",
-        "required": true
+        "required": true,
+        "scope": "extra"
       },
       {
-        "id": "baseUrl",
-        "label": "Base URL",
-        "type": "text"
+        "id": "accessKeySecret",
+        "label": "Access Key Secret",
+        "type": "secret",
+        "required": true,
+        "scope": "extra"
       },
       {
-        "id": "model",
-        "label": "Model",
+        "id": "appKey",
+        "label": "App Key",
+        "type": "text",
+        "required": true,
+        "scope": "extra"
+      },
+      {
+        "id": "region",
+        "label": "Region",
         "type": "select",
-        "optionsSource": "models"
+        "default": "cn-shanghai",
+        "scope": "extra",
+        "options": [
+          {
+            "id": "cn-shanghai",
+            "label": "cn-shanghai"
+          },
+          {
+            "id": "cn-beijing",
+            "label": "cn-beijing"
+          },
+          {
+            "id": "cn-shenzhen",
+            "label": "cn-shenzhen"
+          },
+          {
+            "id": "cn-shanghai-internal",
+            "label": "cn-shanghai-internal"
+          },
+          {
+            "id": "cn-beijing-internal",
+            "label": "cn-beijing-internal"
+          },
+          {
+            "id": "cn-shenzhen-internal",
+            "label": "cn-shenzhen-internal"
+          }
+        ]
       }
     ]
   },

@@ -12,12 +12,12 @@ dependencies = [
   "python-multipart",
   "python-dotenv",
   "pyyaml",
+  "websockets>=12.0",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pyinstaller",
-  "websockets>=12.0",
 ]
 
 [build-system]

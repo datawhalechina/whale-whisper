@@ -450,7 +450,7 @@ export const transcriptionProviderOptions: ProviderOption[] = [
     icon: "i-lobe-icons:alibabacloud",
     description: "Aliyun transcription.",
     category: "transcription",
-    requiresApiKey: true,
+    engineId: "aliyun-nls-asr",
   },
   {
     id: "comet-api-transcription",

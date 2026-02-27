@@ -37,10 +37,37 @@ OPENAI_COMPAT_IDS = {
     "player2",
 }
 
+ALIYUN_NLS_ASR_IDS = {
+    "aliyun-nls-transcription",
+    "aliyun-nls-asr",
+}
 
 class ProviderRegistry:
     async def validate(self, config: ProviderConfig) -> ProviderValidation:
         provider_id = config.provider_id
+        if provider_id in ALIYUN_NLS_ASR_IDS:
+            access_key_id = str(
+                config.extra.get("accessKeyId")
+                or config.extra.get("access_key_id")
+                or ""
+            ).strip()
+            access_key_secret = str(
+                config.extra.get("accessKeySecret")
+                or config.extra.get("access_key_secret")
+                or ""
+            ).strip()
+            app_key = str(
+                config.extra.get("appKey")
+                or config.extra.get("app_key")
+                or ""
+            ).strip()
+            if not access_key_id:
+                return ProviderValidation(valid=False, reason="Missing accessKeyId for Aliyun NLS ASR")
+            if not access_key_secret:
+                return ProviderValidation(valid=False, reason="Missing accessKeySecret for Aliyun NLS ASR")
+            if not app_key:
+                return ProviderValidation(valid=False, reason="Missing appKey for Aliyun NLS ASR")
+            return ProviderValidation(valid=True)
         if provider_id in {"dify", "fastgpt"}:
             return self._validate_basic(config, require_base_url=True, require_api_key=True)
         if provider_id == "coze":
@@ -65,6 +92,8 @@ class ProviderRegistry:
 
     async def list_models(self, config: ProviderConfig) -> List[dict]:
         provider_id = config.provider_id
+        if provider_id in ALIYUN_NLS_ASR_IDS:
+            return [{"id": "aliyun-nls-v1", "label": "aliyun-nls-v1"}]
         if provider_id in OPENAI_COMPAT_IDS or "openai" in provider_id:
             return await self._fetch_openai_models(config)
         return []

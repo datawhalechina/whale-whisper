@@ -197,6 +197,23 @@ asr:
           default: json
         - name: language
           type: string
+    - id: aliyun-nls-asr
+      label: Aliyun NLS ASR
+      type: aliyun_nls_asr
+      base_url: http://nls-meta.cn-shanghai.aliyuncs.com
+      model: aliyun-nls-v1
+      defaults:
+        region: cn-shanghai
+      params:
+        - name: accessKeyId
+          type: string
+        - name: accessKeySecret
+          type: secret
+        - name: appKey
+          type: string
+        - name: region
+          type: string
+          default: cn-shanghai
     - id: dify-asr
       label: Dify ASR
       type: dify_asr

@@ -765,19 +765,42 @@ providers:
     label: Aliyun NLS
     category: transcription
     icon: i-lobe-icons:alibabacloud
-    description: Aliyun transcription.
+    description: Aliyun NLS realtime transcription.
+    engine_id: aliyun-nls-asr
     fields:
-      - id: apiKey
-        label: API Key
+      - id: accessKeyId
+        label: Access Key ID
         type: secret
         required: true
-      - id: baseUrl
-        label: Base URL
+        scope: extra
+      - id: accessKeySecret
+        label: Access Key Secret
+        type: secret
+        required: true
+        scope: extra
+      - id: appKey
+        label: App Key
         type: text
-      - id: model
-        label: Model
+        required: true
+        scope: extra
+      - id: region
+        label: Region
         type: select
-        options_source: models
+        default: cn-shanghai
+        scope: extra
+        options:
+          - id: cn-shanghai
+            label: cn-shanghai
+          - id: cn-beijing
+            label: cn-beijing
+          - id: cn-shenzhen
+            label: cn-shenzhen
+          - id: cn-shanghai-internal
+            label: cn-shanghai-internal
+          - id: cn-beijing-internal
+            label: cn-beijing-internal
+          - id: cn-shenzhen-internal
+            label: cn-shenzhen-internal
   - id: comet-api-transcription
     label: Comet API
     category: transcription

@@ -1,10 +1,17 @@
 import base64
+import asyncio
+import hashlib
+import hmac
 import io
 import json
+import uuid
 import wave
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 
 import httpx
+import websockets
 from fastapi import APIRouter, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 
 from app.api.engine_schemas import (
@@ -78,6 +85,8 @@ async def run_asr_engine(request: EngineRunRequest) -> dict:
         return await _forward_dify_transcription(config, audio_bytes, overrides, filename, content_type)
     if engine_type in {"coze_asr", "coze"}:
         return await _forward_coze_transcription(config, audio_bytes, overrides, filename, content_type)
+    if engine_type in {"aliyun_nls_asr", "aliyun_nls"}:
+        return await _forward_aliyun_nls_transcription(config, audio_bytes, overrides, filename, content_type)
     response = await _forward_transcription(config, audio_bytes, overrides, filename, content_type)
     return response
 
@@ -97,6 +106,8 @@ async def run_asr_engine_file(
         return await _forward_dify_transcription(config, audio_bytes, {}, filename, content_type)
     if engine_type in {"coze_asr", "coze"}:
         return await _forward_coze_transcription(config, audio_bytes, {}, filename, content_type)
+    if engine_type in {"aliyun_nls_asr", "aliyun_nls"}:
+        return await _forward_aliyun_nls_transcription(config, audio_bytes, {}, filename, content_type)
     response = await _forward_transcription(config, audio_bytes, {}, filename, content_type)
     return response
 
@@ -154,6 +165,10 @@ async def run_asr_engine_stream(websocket: WebSocket) -> None:
                         response = await _forward_coze_transcription(
                             engine_config, wav_bytes, overrides, filename, content_type
                         )
+                    elif engine_type in {"aliyun_nls_asr", "aliyun_nls"}:
+                        response = await _forward_aliyun_nls_transcription(
+                            engine_config, wav_bytes, overrides, filename, content_type
+                        )
                     else:
                         response = await _forward_transcription(
                             engine_config, wav_bytes, overrides, filename, content_type
@@ -190,7 +205,7 @@ def _get_engine_config(engine_id: str):
     if not config or not config.base_url:
         raise HTTPException(status_code=404, detail="ASR engine not configured")
     engine_type = (config.engine_type or "openai_compat").lower()
-    if engine_type not in {"dify_asr", "coze_asr", "dify", "coze"} and not config.model:
+    if engine_type not in {"dify_asr", "coze_asr", "aliyun_nls_asr", "dify", "coze", "aliyun_nls"} and not config.model:
         raise HTTPException(status_code=400, detail="ASR engine missing model")
     return config
 
@@ -335,6 +350,250 @@ async def _forward_coze_transcription(
         payload = response.json()
     text = _extract_text(payload)
     return {"text": text} if text else payload
+
+
+def _to_int(value: Any, fallback: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _resolve_audio_format(filename: str, content_type: str) -> str:
+    normalized_type = (content_type or "").strip().lower()
+    if "/" in normalized_type:
+        fmt = normalized_type.split("/", 1)[1].split(";", 1)[0].strip()
+        if fmt:
+            return fmt
+    if "." in (filename or ""):
+        return filename.rsplit(".", 1)[-1].strip().lower()
+    return "wav"
+
+
+def _aliyun_quote(value: str) -> str:
+    return quote(value, safe="~")
+
+
+def _build_aliyun_create_token_url(
+    access_key_id: str,
+    access_key_secret: str,
+    region: str,
+    endpoint: str,
+    timestamp: str,
+    signature_nonce: str,
+) -> str:
+    params = {
+        "AccessKeyId": access_key_id,
+        "Action": "CreateToken",
+        "Format": "JSON",
+        "RegionId": region,
+        "SignatureMethod": "HMAC-SHA1",
+        "SignatureNonce": signature_nonce,
+        "SignatureVersion": "1.0",
+        "Timestamp": timestamp,
+        "Version": "2019-02-28",
+    }
+    canonical_query = "&".join(
+        f"{_aliyun_quote(k)}={_aliyun_quote(str(v))}" for k, v in sorted(params.items(), key=lambda item: item[0])
+    )
+    string_to_sign = f"POST&{_aliyun_quote('/')}&{_aliyun_quote(canonical_query)}"
+    signature = base64.b64encode(
+        hmac.new(
+            f"{access_key_secret}&".encode("utf-8"),
+            string_to_sign.encode("utf-8"),
+            hashlib.sha1,
+        ).digest()
+    ).decode("utf-8")
+    signed_query = f"Signature={_aliyun_quote(signature)}&{canonical_query}"
+    return f"{endpoint.rstrip('/')}/?{signed_query}"
+
+
+def _aliyun_nls_websocket_endpoint(region: str) -> str:
+    internal_regions = {
+        "cn-shanghai-internal",
+        "cn-beijing-internal",
+        "cn-shenzhen-internal",
+    }
+    public_regions = {
+        "cn-shanghai",
+        "cn-beijing",
+        "cn-shenzhen",
+    }
+    normalized = (region or "").strip().lower()
+    if normalized in internal_regions:
+        return f"wss://nls-gateway-{normalized}.aliyuncs.com:80/ws/v1"
+    if normalized in public_regions:
+        return f"wss://nls-gateway-{normalized}.aliyuncs.com/ws/v1"
+    return "wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1"
+
+
+def _resolve_aliyun_nls_credentials(config, overrides: Dict[str, Any]) -> Dict[str, Any]:
+    params = _merge_params(config, overrides)
+    access_key_id = str(
+        params.get("accessKeyId")
+        or params.get("access_key_id")
+        or params.get("akId")
+        or ""
+    ).strip()
+    access_key_secret = str(
+        params.get("accessKeySecret")
+        or params.get("access_key_secret")
+        or params.get("akSecret")
+        or ""
+    ).strip()
+    app_key = str(
+        params.get("appKey")
+        or params.get("app_key")
+        or ""
+    ).strip()
+    region = str(params.get("region") or "cn-shanghai").strip().lower()
+    if not access_key_id:
+        raise HTTPException(status_code=400, detail="Aliyun NLS ASR missing accessKeyId")
+    if not access_key_secret:
+        raise HTTPException(status_code=400, detail="Aliyun NLS ASR missing accessKeySecret")
+    if not app_key:
+        raise HTTPException(status_code=400, detail="Aliyun NLS ASR missing appKey")
+    return {
+        "params": params,
+        "access_key_id": access_key_id,
+        "access_key_secret": access_key_secret,
+        "app_key": app_key,
+        "region": region,
+    }
+
+
+async def _create_aliyun_nls_token(
+    access_key_id: str,
+    access_key_secret: str,
+    region: str,
+    endpoint: str,
+    timeout: float,
+) -> str:
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    signature_nonce = str(uuid.uuid4())
+    token_url = _build_aliyun_create_token_url(
+        access_key_id=access_key_id,
+        access_key_secret=access_key_secret,
+        region=region,
+        endpoint=endpoint,
+        timestamp=timestamp,
+        signature_nonce=signature_nonce,
+    )
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(token_url)
+        response.raise_for_status()
+        payload = response.json()
+    token_info = payload.get("Token") if isinstance(payload, dict) else None
+    token = token_info.get("Id") if isinstance(token_info, dict) else ""
+    if not isinstance(token, str) or not token.strip():
+        message = payload.get("Message") if isinstance(payload, dict) else "Unknown error"
+        raise HTTPException(status_code=400, detail=f"Aliyun NLS token creation failed: {message}")
+    return token.strip()
+
+
+async def _forward_aliyun_nls_transcription(
+    config,
+    audio_bytes: bytes,
+    overrides: Dict[str, Any],
+    filename: str,
+    content_type: str,
+) -> dict:
+    resolved = _resolve_aliyun_nls_credentials(config, overrides)
+    params = resolved["params"]
+    access_key_id = resolved["access_key_id"]
+    access_key_secret = resolved["access_key_secret"]
+    app_key = resolved["app_key"]
+    region = resolved["region"]
+
+    endpoint = (
+        str(params.get("endpoint") or params.get("meta_endpoint") or config.base_url or "").strip()
+        or f"http://nls-meta.{region}.aliyuncs.com"
+    )
+    token = await _create_aliyun_nls_token(
+        access_key_id=access_key_id,
+        access_key_secret=access_key_secret,
+        region=region,
+        endpoint=endpoint,
+        timeout=config.timeout,
+    )
+
+    ws_url = f"{_aliyun_nls_websocket_endpoint(region)}?token={_aliyun_quote(token)}"
+    task_id = uuid.uuid4().hex
+    audio_format = str(params.get("format") or _resolve_audio_format(filename, content_type) or "wav").lower()
+    sample_rate = _to_int(params.get("sample_rate") or params.get("sampleRate"), 16000)
+
+    start_payload = {
+        "header": {
+            "appkey": app_key,
+            "message_id": uuid.uuid4().hex,
+            "task_id": task_id,
+            "namespace": "SpeechTranscriber",
+            "name": "StartTranscription",
+        },
+        "payload": {
+            "format": audio_format,
+            "sample_rate": sample_rate,
+            "enable_intermediate_result": True,
+            "enable_punctuation_prediction": True,
+        },
+    }
+    stop_payload = {
+        "header": {
+            "appkey": app_key,
+            "message_id": uuid.uuid4().hex,
+            "task_id": task_id,
+            "namespace": "SpeechTranscriber",
+            "name": "StopTranscription",
+        },
+        "payload": {},
+    }
+
+    sentence_results = []
+    last_partial = ""
+    timeout_seconds = max(float(config.timeout or 60.0), 10.0)
+
+    try:
+        async with websockets.connect(ws_url, max_size=None, open_timeout=timeout_seconds) as ws:
+            await ws.send(json.dumps(start_payload))
+            started = False
+
+            while True:
+                raw_message = await asyncio.wait_for(ws.recv(), timeout=timeout_seconds)
+                if isinstance(raw_message, bytes):
+                    continue
+
+                event = json.loads(raw_message)
+                header = event.get("header") if isinstance(event, dict) else {}
+                payload = event.get("payload") if isinstance(event, dict) else {}
+                event_name = header.get("name")
+                status = header.get("status")
+                if status not in (None, 20000000, "20000000"):
+                    status_message = header.get("status_message") or payload.get("message") or "Unknown status"
+                    raise HTTPException(status_code=400, detail=f"Aliyun NLS ASR failed: {status_message}")
+
+                if event_name == "TranscriptionStarted" and not started:
+                    started = True
+                    await ws.send(audio_bytes)
+                    await ws.send(json.dumps(stop_payload))
+                    continue
+
+                if event_name == "SentenceEnd":
+                    result_text = str(payload.get("result") or "").strip()
+                    if result_text:
+                        sentence_results.append(result_text)
+                    continue
+
+                if event_name == "TranscriptionResultChanged":
+                    last_partial = str(payload.get("result") or "").strip()
+                    continue
+
+                if event_name == "TranscriptionCompleted":
+                    break
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="Aliyun NLS ASR timed out") from exc
+
+    final_text = "\n".join(sentence_results).strip() or last_partial
+    return {"text": final_text} if final_text else {"text": ""}
 
 
 def _extract_text(payload: Dict[str, Any]) -> str:
