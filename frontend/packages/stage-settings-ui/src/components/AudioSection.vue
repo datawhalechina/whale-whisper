@@ -182,25 +182,11 @@ const speechThreshold = computed({
   },
 });
 
-const sttEnabled = computed({
-  get: () => !!props.transcription?.enabled,
-  set: (value: boolean) => {
-    if (!props.transcription) return;
-    props.transcription.enabled = value;
-  },
-});
 const autoSend = computed({
   get: () => !!props.transcription?.autoSend,
   set: (value: boolean) => {
     if (!props.transcription) return;
     props.transcription.autoSend = value;
-  },
-});
-const language = computed({
-  get: () => props.transcription?.language ?? "en-US",
-  set: (value: string) => {
-    if (!props.transcription) return;
-    props.transcription.language = value;
   },
 });
 const vadMinSpeechMs = computed({
@@ -307,13 +293,26 @@ function formatDeviceLabel(device: { deviceId: string; label?: string }) {
   return cleaned || t("audio.device.unknown");
 }
 
-function toggleListening() {
-  if (!props.transcription) return;
-  if (props.transcription.listening) {
-    props.transcription.stopListening?.();
-  } else {
-    props.transcription.startListening?.();
+const micActive = computed(() => {
+  if (props.transcription) {
+    return !!props.transcription.listening;
   }
+  return micEnabled.value;
+});
+
+function toggleMicInput() {
+  if (props.transcription?.canListen) {
+    if (props.transcription.listening) {
+      props.transcription.stopListening?.();
+      return;
+    }
+    props.transcription.enabled = true;
+    props.transcription.autoSend = true;
+    props.transcription.startListening?.();
+    return;
+  }
+
+  micEnabled.value = !micEnabled.value;
 }
 
 onMounted(() => {
@@ -334,23 +333,23 @@ onMounted(() => {
         <div class="relative h-24 w-24">
           <div
             class="absolute left-1/2 top-1/2 h-16 w-16 rounded-full transition-all duration-150 -translate-x-1/2 -translate-y-1/2"
-            :class="micEnabled ? 'bg-primary-500/20' : 'bg-neutral-300/20 dark:bg-neutral-700/30'"
+            :class="micActive ? 'bg-primary-500/20' : 'bg-neutral-300/20 dark:bg-neutral-700/30'"
             :style="{ transform: `translate(-50%, -50%) scale(${1 + ((props.hearing?.volumeLevel ?? 0) / 100) * 0.35})` }"
           />
           <div
             class="absolute left-1/2 top-1/2 h-20 w-20 rounded-full transition-all duration-200 -translate-x-1/2 -translate-y-1/2"
-            :class="micEnabled ? 'bg-primary-500/10' : 'bg-neutral-300/10 dark:bg-neutral-700/20'"
+            :class="micActive ? 'bg-primary-500/10' : 'bg-neutral-300/10 dark:bg-neutral-700/20'"
             :style="{ transform: `translate(-50%, -50%) scale(${1.2 + ((props.hearing?.volumeLevel ?? 0) / 100) * 0.5})` }"
           />
           <button
             type="button"
             class="absolute left-1/2 top-1/2 grid h-14 w-14 place-items-center rounded-full shadow-md transition-all duration-200 -translate-x-1/2 -translate-y-1/2"
-            :class="micEnabled
+            :class="micActive
               ? 'bg-primary-500 text-white hover:bg-primary-600 active:scale-95'
               : 'bg-neutral-200 text-neutral-600 hover:bg-neutral-300 active:scale-95 dark:bg-neutral-700 dark:text-neutral-200'"
-            @click="micEnabled = !micEnabled"
+            @click="toggleMicInput"
           >
-            <div :class="micEnabled ? 'i-solar:microphone-bold' : 'i-solar:microphone-3-bold-duotone'" class="h-6 w-6" />
+            <div :class="micActive ? 'i-solar:microphone-bold' : 'i-solar:microphone-3-bold-duotone'" class="h-6 w-6" />
           </button>
         </div>
 
@@ -403,42 +402,8 @@ onMounted(() => {
       </div>
 
       <div class="mt-4 grid gap-2">
-        <div class="flex items-center justify-between rounded-xl border border-neutral-200/70 bg-white/60 px-3 py-2 dark:border-neutral-800/70 dark:bg-neutral-900/60">
-          <div>
-            <div class="text-sm font-medium text-neutral-800 dark:text-neutral-100">
-              {{ t("audio.stt.title") }}
-            </div>
-            <div class="text-xs text-neutral-500 dark:text-neutral-400">
-              {{ t("audio.stt.desc") }}
-            </div>
-          </div>
-          <button
-            type="button"
-            class="rounded-lg border border-neutral-200 bg-white/80 px-3 py-1 text-xs text-neutral-600 transition hover:text-neutral-900 dark:border-neutral-700 dark:bg-neutral-800/80 dark:text-neutral-300"
-            @click="sttEnabled = !sttEnabled"
-          >
-            {{ sttEnabled ? t("common.disabled") : t("common.enabled") }}
-          </button>
-        </div>
         <div class="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            class="rounded-lg border border-neutral-200 bg-white/80 px-3 py-1 text-xs text-neutral-600 transition hover:text-neutral-900 disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-800/80 dark:text-neutral-300"
-            :disabled="!props.transcription?.canListen"
-            @click="toggleListening"
-          >
-            {{ props.transcription?.listening ? t("audio.stt.stop") : t("audio.stt.start") }}
-          </button>
-          <label class="text-xs text-neutral-500 dark:text-neutral-400">
-            {{ t("audio.stt.language") }}
-          </label>
-          <input
-            v-model="language"
-            type="text"
-            placeholder="en-US"
-            class="w-28 rounded-lg border border-neutral-200 bg-white/80 px-2 py-1 text-xs text-neutral-700 shadow-sm outline-none transition focus:border-primary-400 dark:border-neutral-800 dark:bg-neutral-900/70 dark:text-neutral-200"
-          />
-          <label class="ml-2 flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+          <label class="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
             {{ t("audio.stt.vad.minSpeech") }}
             <input
               v-model.number="vadMinSpeechMs"
@@ -449,7 +414,7 @@ onMounted(() => {
               class="w-20 rounded-lg border border-neutral-200 bg-white/80 px-2 py-1 text-xs text-neutral-700 shadow-sm outline-none transition focus:border-primary-400 dark:border-neutral-800 dark:bg-neutral-900/70 dark:text-neutral-200"
             />
           </label>
-          <label class="ml-2 flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+          <label class="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
             {{ t("audio.stt.vad.silence") }}
             <input
               v-model.number="vadSilenceMs"
@@ -460,19 +425,21 @@ onMounted(() => {
               class="w-20 rounded-lg border border-neutral-200 bg-white/80 px-2 py-1 text-xs text-neutral-700 shadow-sm outline-none transition focus:border-primary-400 dark:border-neutral-800 dark:bg-neutral-900/70 dark:text-neutral-200"
             />
           </label>
-          <label class="ml-2 flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+          <label class="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
             <input v-model="autoSend" type="checkbox" class="accent-primary-500" />
             {{ t("audio.stt.autosend") }}
           </label>
         </div>
+        <div class="text-xs text-neutral-500 dark:text-neutral-400">
+          {{ t("audio.stt.last") }}
+        </div>
+        <div class="rounded-xl border border-neutral-200/70 bg-white/60 px-3 py-2 text-xs text-neutral-700 dark:border-neutral-800/70 dark:bg-neutral-900/60 dark:text-neutral-300">
+          <span v-if="props.transcription?.interimText">{{ props.transcription.interimText }}</span>
+          <span v-else-if="props.transcription?.lastTranscript">{{ props.transcription.lastTranscript }}</span>
+          <span v-else class="text-neutral-400 dark:text-neutral-500">-</span>
+        </div>
         <div v-if="props.transcription?.error" class="text-xs text-rose-500">
           {{ props.transcription.error }}
-        </div>
-        <div v-if="props.transcription?.interimText" class="text-xs text-neutral-500 dark:text-neutral-400">
-          {{ t("audio.stt.listening") }} {{ props.transcription.interimText }}
-        </div>
-        <div v-else-if="props.transcription?.lastTranscript" class="text-xs text-neutral-500 dark:text-neutral-400">
-          {{ t("audio.stt.last") }} {{ props.transcription.lastTranscript }}
         </div>
       </div>
     </div>

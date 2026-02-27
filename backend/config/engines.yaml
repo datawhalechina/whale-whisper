@@ -198,22 +198,29 @@ asr:
         - name: language
           type: string
     - id: aliyun-nls-asr
-      label: Aliyun NLS ASR
-      type: aliyun_nls_asr
-      base_url: http://nls-meta.cn-shanghai.aliyuncs.com
-      model: aliyun-nls-v1
+      label: Alibaba Bailian ASR
+      type: aliyun_dashscope_asr
+      base_url: https://dashscope.aliyuncs.com
+      model: qwen3-asr-flash-realtime
+      api_key_env: DASHSCOPE_API_KEY
       defaults:
-        region: cn-shanghai
+        region: cn-beijing
+        enable_server_vad: false
+        enable_itn: false
+        enable_words: true
       params:
-        - name: accessKeyId
-          type: string
-        - name: accessKeySecret
-          type: secret
-        - name: appKey
-          type: string
+        - name: enable_server_vad
+          type: bool
+          default: false
         - name: region
           type: string
-          default: cn-shanghai
+          default: cn-beijing
+        - name: enable_itn
+          type: bool
+          default: false
+        - name: enable_words
+          type: bool
+          default: true
     - id: dify-asr
       label: Dify ASR
       type: dify_asr

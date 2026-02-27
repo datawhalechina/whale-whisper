@@ -1136,63 +1136,36 @@ export const fallbackProviderCatalog: ProviderCatalogEntry[] = [
   },
   {
     "id": "aliyun-nls-transcription",
-    "label": "Aliyun NLS",
+    "label": "阿里百炼",
     "category": "transcription",
     "icon": "i-lobe-icons:alibabacloud",
-    "description": "Aliyun transcription.",
+    "description": "Alibaba Bailian ASR transcription.",
     "engineId": "aliyun-nls-asr",
+    "defaults": {
+      "model": "qwen3-asr-flash-realtime"
+    },
     "fields": [
       {
-        "id": "accessKeyId",
-        "label": "Access Key ID",
+        "id": "apiKey",
+        "label": "API Key",
         "type": "secret",
         "required": true,
-        "scope": "extra"
+        "scope": "config"
       },
       {
-        "id": "accessKeySecret",
-        "label": "Access Key Secret",
-        "type": "secret",
-        "required": true,
-        "scope": "extra"
-      },
-      {
-        "id": "appKey",
-        "label": "App Key",
-        "type": "text",
-        "required": true,
-        "scope": "extra"
-      },
-      {
-        "id": "region",
-        "label": "Region",
+        "id": "model",
+        "label": "Model",
         "type": "select",
-        "default": "cn-shanghai",
-        "scope": "extra",
+        "scope": "config",
+        "default": "qwen3-asr-flash-realtime",
         "options": [
           {
-            "id": "cn-shanghai",
-            "label": "cn-shanghai"
+            "id": "qwen3-asr-flash-realtime",
+            "label": "qwen3-asr-flash-realtime"
           },
           {
-            "id": "cn-beijing",
-            "label": "cn-beijing"
-          },
-          {
-            "id": "cn-shenzhen",
-            "label": "cn-shenzhen"
-          },
-          {
-            "id": "cn-shanghai-internal",
-            "label": "cn-shanghai-internal"
-          },
-          {
-            "id": "cn-beijing-internal",
-            "label": "cn-beijing-internal"
-          },
-          {
-            "id": "cn-shenzhen-internal",
-            "label": "cn-shenzhen-internal"
+            "id": "qwen3-asr-flash",
+            "label": "qwen3-asr-flash"
           }
         ]
       }

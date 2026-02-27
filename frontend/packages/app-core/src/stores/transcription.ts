@@ -225,6 +225,13 @@ export const useTranscriptionStore = defineStore("transcription", () => {
       return;
     }
 
+    if (!enabled.value) {
+      enabled.value = true;
+    }
+    if (!autoSend.value) {
+      autoSend.value = true;
+    }
+
     listening.value = true;
 
     if (!hearingStore.enabled) {
@@ -232,10 +239,6 @@ export const useTranscriptionStore = defineStore("transcription", () => {
       hearingStore.enabled = true;
     }
     await hearingStore.start();
-
-    if (!enabled.value) {
-      return;
-    }
 
     if (useBrowserRecognition.value && supported.value) {
       const recognizer = ensureRecognition();
@@ -444,16 +447,21 @@ export const useTranscriptionStore = defineStore("transcription", () => {
     if (vadActive.value) return;
     vadActive.value = true;
     listening.value = true;
+    error.value = null;
 
     try {
-      await hearingStore.startSpeechDetection({
-        minSpeechMs: minSpeechMs.value,
-      });
+      // Always use local volume-threshold detection to avoid external VAD runtime/CDN dependency.
+      hearingStore.stopSpeechDetection();
+      await hearingStore.start();
       if (workletAvailable.value) {
         await ensureCaptureSession();
       }
     } catch (err) {
-      error.value = err instanceof Error ? err.message : "Failed to start VAD.";
+      hearingStore.stopSpeechDetection();
+      error.value =
+        err instanceof Error
+          ? err.message
+          : "Failed to start microphone listening.";
     }
   }
 

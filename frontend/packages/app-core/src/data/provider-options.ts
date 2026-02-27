@@ -446,9 +446,9 @@ export const transcriptionProviderOptions: ProviderOption[] = [
   },
   {
     id: "aliyun-nls-transcription",
-    label: "Aliyun NLS",
+    label: "阿里百炼",
     icon: "i-lobe-icons:alibabacloud",
-    description: "Aliyun transcription.",
+    description: "Alibaba Bailian ASR transcription.",
     category: "transcription",
     engineId: "aliyun-nls-asr",
   },

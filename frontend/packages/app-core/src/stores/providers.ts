@@ -40,6 +40,27 @@ export type ProviderRuntime = {
 
 const configFieldIds = new Set(["apiKey", "baseUrl", "model", "voice"]);
 const credentialFieldIds = new Set(["apiKey", "baseUrl"]);
+const ALIYUN_NLS_PROVIDER_ID = "aliyun-nls-transcription";
+const aliyunNlsNormalizedFields: ProviderField[] = [
+  {
+    id: "apiKey",
+    label: "API Key",
+    type: "secret",
+    required: true,
+    scope: "config",
+  },
+  {
+    id: "model",
+    label: "Model",
+    type: "select",
+    default: "qwen3-asr-flash-realtime",
+    scope: "config",
+    options: [
+      { id: "qwen3-asr-flash-realtime", label: "qwen3-asr-flash-realtime" },
+      { id: "qwen3-asr-flash", label: "qwen3-asr-flash" },
+    ],
+  },
+];
 
 export const useProvidersStore = defineStore("providers", () => {
   const settingsStore = useSettingsStore();
@@ -58,9 +79,20 @@ export const useProvidersStore = defineStore("providers", () => {
   const catalogError = ref<string | null>(null);
   const { t } = useI18n();
 
+  function normalizeProviderEntry(option: ProviderCatalogEntry): ProviderCatalogEntry {
+    if (option.id !== ALIYUN_NLS_PROVIDER_ID) {
+      return option;
+    }
+
+    return {
+      ...option,
+      fields: aliyunNlsNormalizedFields.map((field) => ({ ...field })),
+    };
+  }
+
   const effectiveProviders = computed(() => {
-    if (catalogProviders.value.length) return catalogProviders.value;
-    if (catalogError.value) return fallbackProviderCatalog;
+    if (catalogProviders.value.length) return catalogProviders.value.map((option) => normalizeProviderEntry(option));
+    if (catalogError.value) return fallbackProviderCatalog.map((option) => normalizeProviderEntry(option));
     return [];
   });
 

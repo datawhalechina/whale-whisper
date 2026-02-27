@@ -10,6 +10,8 @@ from app.services.catalogs.provider_catalog import get_provider_catalog
 
 router = APIRouter(prefix="/providers", tags=["providers"])
 
+ALIYUN_NLS_PROVIDER_ID = "aliyun-nls-transcription"
+
 
 class ProviderRequest(BaseModel):
     provider_id: str = Field(..., alias="providerId")
@@ -33,6 +35,70 @@ class ProviderModelsResponse(BaseModel):
 
 class ProviderVoicesResponse(BaseModel):
     voices: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+def _provider_field_to_dict(field) -> Dict[str, Any]:
+    return {
+        "id": field.id,
+        "label": field.label,
+        "type": field.field_type,
+        "required": field.required,
+        "placeholder": field.placeholder,
+        "default": field.default,
+        "description": field.description,
+        "scope": field.scope,
+        "options": [
+            {
+                "id": option.id,
+                "label": option.label,
+                "description": option.description,
+                "icon": option.icon,
+            }
+            for option in field.options
+        ],
+        "optionsSource": field.options_source,
+    }
+
+
+def _aliyun_nls_default_field_dicts() -> List[Dict[str, Any]]:
+    return [
+        {
+            "id": "apiKey",
+            "label": "API Key",
+            "type": "secret",
+            "required": True,
+            "placeholder": None,
+            "default": None,
+            "description": None,
+            "scope": "config",
+            "options": [],
+            "optionsSource": None,
+        },
+        {
+            "id": "model",
+            "label": "Model",
+            "type": "select",
+            "required": False,
+            "placeholder": None,
+            "default": "qwen3-asr-flash-realtime",
+            "description": None,
+            "scope": "config",
+            "options": [
+                {"id": "qwen3-asr-flash-realtime", "label": "qwen3-asr-flash-realtime", "description": None, "icon": None},
+                {"id": "qwen3-asr-flash", "label": "qwen3-asr-flash", "description": None, "icon": None},
+            ],
+            "optionsSource": None,
+        },
+    ]
+
+
+def _resolve_provider_field_dicts(spec) -> List[Dict[str, Any]]:
+    fields = [_provider_field_to_dict(field) for field in spec.fields]
+    if spec.id != ALIYUN_NLS_PROVIDER_ID:
+        return fields
+
+    # Keep UI minimal for this provider: only API key and model are exposed.
+    return _aliyun_nls_default_field_dicts()
 
 
 def _to_config(request: ProviderRequest) -> ProviderConfig:
@@ -84,29 +150,7 @@ async def list_provider_catalog() -> ProviderCatalogResponse:
             }
             if spec.defaults
             else None,
-            fields=[
-                {
-                    "id": field.id,
-                    "label": field.label,
-                    "type": field.field_type,
-                    "required": field.required,
-                    "placeholder": field.placeholder,
-                    "default": field.default,
-                    "description": field.description,
-                    "scope": field.scope,
-                    "options": [
-                        {
-                            "id": option.id,
-                            "label": option.label,
-                            "description": option.description,
-                            "icon": option.icon,
-                        }
-                        for option in field.options
-                    ],
-                    "optionsSource": field.options_source,
-                }
-                for field in spec.fields
-            ],
+            fields=_resolve_provider_field_dicts(spec),
         )
         for spec in catalog.list()
     ]
