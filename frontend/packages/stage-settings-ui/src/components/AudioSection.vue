@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
 import SelectMenu from "./ui/SelectMenu.vue";
@@ -29,13 +29,17 @@ type TranscriptionState = {
   vadMinSpeechMs?: number;
   vadSilenceMs?: number;
   listening?: boolean;
+  listeningSource?: string | null;
   canListen?: boolean;
   supported?: boolean;
   interimText?: string;
   lastTranscript?: string;
   error?: string | null;
-  startListening?: () => void;
-  stopListening?: () => void;
+  startListening?: (options?: {
+    autoSend?: boolean;
+    source?: string;
+  }) => void | Promise<void>;
+  stopListening?: () => void | Promise<void>;
 };
 
 type SpeechOutputState = {
@@ -182,11 +186,11 @@ const speechThreshold = computed({
   },
 });
 
-const autoSend = computed({
-  get: () => !!props.transcription?.autoSend,
-  set: (value: boolean) => {
+const transcriptionLanguage = computed({
+  get: () => props.transcription?.language ?? (isZh.value ? "zh-CN" : "en-US"),
+  set: (value: string) => {
     if (!props.transcription) return;
-    props.transcription.autoSend = value;
+    props.transcription.language = value;
   },
 });
 const vadMinSpeechMs = computed({
@@ -253,7 +257,35 @@ const deviceOptions = computed<SelectOption[]>(() => {
   }));
 });
 
+const transcriptionLanguageOptions = computed<SelectOption[]>(() => [
+  {
+    id: "zh-CN",
+    label: isZh.value ? "中文（简体）" : "Chinese (Simplified)",
+    description: "zh-CN",
+  },
+  {
+    id: "en-US",
+    label: "English (US)",
+    description: "en-US",
+  },
+  {
+    id: "ja-JP",
+    label: "Japanese",
+    description: "ja-JP",
+  },
+  {
+    id: "ko-KR",
+    label: "Korean",
+    description: "ko-KR",
+  },
+]);
+
 const testText = ref("");
+const transcriptionTestOnlyHint = computed(() =>
+  isZh.value
+    ? "麦克风仅用于测试识别，不会发送到聊天。"
+    : "Microphone here is test-only and will not send to chat."
+);
 const defaultTestText = computed(() =>
   isZh.value ? "你好，这是一段语音测试。" : "Hello! This is a voice test."
 );
@@ -293,22 +325,33 @@ function formatDeviceLabel(device: { deviceId: string; label?: string }) {
   return cleaned || t("audio.device.unknown");
 }
 
+const settingsMicActive = computed(
+  () =>
+    !!props.transcription?.listening &&
+    props.transcription?.listeningSource === "settings-test"
+);
 const micActive = computed(() => {
   if (props.transcription) {
-    return !!props.transcription.listening;
+    return settingsMicActive.value;
   }
   return micEnabled.value;
 });
 
-function toggleMicInput() {
+async function toggleMicInput() {
   if (props.transcription?.canListen) {
-    if (props.transcription.listening) {
-      props.transcription.stopListening?.();
+    const canStopCurrentSession =
+      !!props.transcription.listening &&
+      (props.transcription.listeningSource === "settings-test" ||
+        props.transcription.listeningSource == null);
+    if (canStopCurrentSession) {
+      await props.transcription.stopListening?.();
       return;
     }
     props.transcription.enabled = true;
-    props.transcription.autoSend = true;
-    props.transcription.startListening?.();
+    await props.transcription.startListening?.({
+      autoSend: false,
+      source: "settings-test",
+    });
     return;
   }
 
@@ -402,6 +445,17 @@ onMounted(() => {
       </div>
 
       <div class="mt-4 grid gap-2">
+        <label class="text-xs text-neutral-500 dark:text-neutral-400">
+          {{ t("audio.stt.language") }}
+        </label>
+        <SelectMenu
+          v-model="transcriptionLanguage"
+          :options="transcriptionLanguageOptions"
+          :placeholder="t('audio.stt.language')"
+        />
+      </div>
+
+      <div class="mt-4 grid gap-2">
         <div class="flex flex-wrap items-center gap-2">
           <label class="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
             {{ t("audio.stt.vad.minSpeech") }}
@@ -425,10 +479,9 @@ onMounted(() => {
               class="w-20 rounded-lg border border-neutral-200 bg-white/80 px-2 py-1 text-xs text-neutral-700 shadow-sm outline-none transition focus:border-primary-400 dark:border-neutral-800 dark:bg-neutral-900/70 dark:text-neutral-200"
             />
           </label>
-          <label class="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
-            <input v-model="autoSend" type="checkbox" class="accent-primary-500" />
-            {{ t("audio.stt.autosend") }}
-          </label>
+        </div>
+        <div class="text-xs text-neutral-500 dark:text-neutral-400">
+          {{ transcriptionTestOnlyHint }}
         </div>
         <div class="text-xs text-neutral-500 dark:text-neutral-400">
           {{ t("audio.stt.last") }}
@@ -530,3 +583,4 @@ onMounted(() => {
     </div>
   </div>
 </template>
+

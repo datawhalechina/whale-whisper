@@ -9,6 +9,11 @@ import {
   pcm16ToWavBlob,
 } from "../utils/audio-stream";
 import { shouldAutoRestartBrowserRecognition } from "../utils/browser-recognition-restart";
+import { decideCaptureFallback } from "../utils/capture-startup";
+import {
+  normalizeTranscriptionLanguage,
+  resolveInitialTranscriptionLanguage,
+} from "../utils/transcription-language";
 import { sanitizeTranscript } from "../utils/transcript-filter";
 import { useChatStore } from "./chat";
 import { useHearingStore } from "./hearing";
@@ -23,6 +28,11 @@ type RecordingResult = {
 };
 
 type CaptureMode = "worklet" | "media";
+type ListeningSource = "settings-test" | "chat-input";
+type StartListeningOptions = {
+  autoSend?: boolean;
+  source?: ListeningSource;
+};
 const BROWSER_RECOGNITION_RESTART_DELAY_MS = 250;
 
 export const useTranscriptionStore = defineStore("transcription", () => {
@@ -34,7 +44,14 @@ export const useTranscriptionStore = defineStore("transcription", () => {
 
   const enabled = useLocalStorage("whalewhisper/audio/transcription/enabled", false);
   const autoSend = useLocalStorage("whalewhisper/audio/transcription/auto-send", true);
-  const language = useLocalStorage("whalewhisper/audio/transcription/language", "en-US");
+  const initialLanguage =
+    typeof navigator !== "undefined"
+      ? resolveInitialTranscriptionLanguage(navigator.language)
+      : resolveInitialTranscriptionLanguage(undefined);
+  const language = useLocalStorage(
+    "whalewhisper/audio/transcription/language",
+    initialLanguage
+  );
   const vadMinSpeechMs = useLocalStorage(
     "whalewhisper/audio/transcription/vad-min-ms",
     300
@@ -90,6 +107,8 @@ export const useTranscriptionStore = defineStore("transcription", () => {
   const lastTranscript = ref("");
   const error = ref<string | null>(null);
   const vadActive = ref(false);
+  const activeAutoSend = ref(Boolean(autoSend.value));
+  const listeningSource = ref<ListeningSource | null>(null);
 
   let recognition: any = null;
   let recorder: MediaRecorder | null = null;
@@ -113,6 +132,7 @@ export const useTranscriptionStore = defineStore("transcription", () => {
   let streamPending: ArrayBuffer[] = [];
   let streamConnection: ReturnType<typeof openAsrStream> | null = null;
   let streamReady = false;
+  let workletCaptureDisabled = false;
 
   const minSpeechMs = computed(() =>
     Math.max(100, Number(vadMinSpeechMs.value) || 300)
@@ -128,9 +148,23 @@ export const useTranscriptionStore = defineStore("transcription", () => {
     }
     lastTranscript.value = transcript;
     interimText.value = "";
-    if (autoSend.value) {
+    if (activeAutoSend.value) {
       chatStore.send(transcript);
     }
+  }
+
+  function resolveStartAutoSend(options?: StartListeningOptions) {
+    if (typeof options?.autoSend === "boolean") {
+      return options.autoSend;
+    }
+    return Boolean(autoSend.value);
+  }
+
+  function resolveStartSource(options: StartListeningOptions | undefined, nextAutoSend: boolean) {
+    if (options?.source) {
+      return options.source;
+    }
+    return nextAutoSend ? "chat-input" : "settings-test";
   }
 
   function shouldRestartBrowserRecognition() {
@@ -155,7 +189,7 @@ export const useTranscriptionStore = defineStore("transcription", () => {
   function startBrowserRecognitionSession() {
     const recognizer = ensureRecognition();
     if (!recognizer) return;
-    recognizer.lang = language.value;
+    recognizer.lang = normalizeTranscriptionLanguage(language.value);
     try {
       recognizer.start();
     } catch (err) {
@@ -204,7 +238,7 @@ export const useTranscriptionStore = defineStore("transcription", () => {
     recognition = new Ctor();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = language.value;
+    recognition.lang = normalizeTranscriptionLanguage(language.value);
 
     recognition.onstart = () => {
       listening.value = true;
@@ -289,7 +323,7 @@ export const useTranscriptionStore = defineStore("transcription", () => {
     }
   }
 
-  async function startListening() {
+  async function startListening(options?: StartListeningOptions) {
     if (!canListen.value) {
       error.value = useBrowserRecognition.value
         ? "Speech recognition is not supported in this environment."
@@ -300,8 +334,12 @@ export const useTranscriptionStore = defineStore("transcription", () => {
     if (!enabled.value) {
       enabled.value = true;
     }
-    if (!autoSend.value) {
-      autoSend.value = true;
+    const nextAutoSend = resolveStartAutoSend(options);
+    activeAutoSend.value = nextAutoSend;
+    listeningSource.value = resolveStartSource(options, nextAutoSend);
+
+    if (listening.value) {
+      return;
     }
 
     listening.value = true;
@@ -325,6 +363,8 @@ export const useTranscriptionStore = defineStore("transcription", () => {
   }
 
   async function stopListening() {
+    const wasSettingsTest = listeningSource.value === "settings-test";
+    const wasChatInput = listeningSource.value === "chat-input";
     listening.value = false;
 
     if (useBrowserRecognition.value) {
@@ -336,10 +376,16 @@ export const useTranscriptionStore = defineStore("transcription", () => {
       await stopVad();
     }
 
-    if (restoreHearingEnabled === false) {
+    if (wasSettingsTest || wasChatInput) {
+      hearingStore.stopSpeechDetection();
+      hearingStore.stop();
+      hearingStore.enabled = false;
+    } else if (restoreHearingEnabled === false) {
       hearingStore.enabled = false;
     }
     restoreHearingEnabled = null;
+    activeAutoSend.value = Boolean(autoSend.value);
+    listeningSource.value = null;
   }
 
   function resolveRecorderMimeType() {
@@ -358,9 +404,9 @@ export const useTranscriptionStore = defineStore("transcription", () => {
     error.value = null;
     if (!navigator.mediaDevices?.getUserMedia) {
       error.value = "Microphone is not supported in this environment.";
-      return;
+      return false;
     }
-    if (recorder) return;
+    if (recorder) return true;
 
     const constraints: MediaStreamConstraints = {
       audio: hearingStore.selectedDeviceId
@@ -371,7 +417,7 @@ export const useTranscriptionStore = defineStore("transcription", () => {
       recorderStream = await navigator.mediaDevices.getUserMedia(constraints);
     } catch (err) {
       error.value = err instanceof Error ? err.message : "Failed to access microphone.";
-      return;
+      return false;
     }
 
     const mimeType = resolveRecorderMimeType();
@@ -384,7 +430,7 @@ export const useTranscriptionStore = defineStore("transcription", () => {
     } catch (err) {
       error.value = err instanceof Error ? err.message : "Failed to start recorder.";
       cleanupRecorder();
-      return;
+      return false;
     }
 
     recorder.ondataavailable = (event) => {
@@ -402,6 +448,7 @@ export const useTranscriptionStore = defineStore("transcription", () => {
       error.value = detail?.message || "Recorder error.";
     };
     recorder.start();
+    return true;
   }
 
   async function stopRecording() {
@@ -477,9 +524,7 @@ export const useTranscriptionStore = defineStore("transcription", () => {
     if (model) {
       config.model = model;
     }
-    if (language.value) {
-      config.language = language.value;
-    }
+    config.language = normalizeTranscriptionLanguage(language.value);
     const extension = resolveExtension(mimeType);
     config.filename = extension ? `audio.${extension}` : "audio.wav";
     config.content_type = mimeType || "application/octet-stream";
@@ -525,8 +570,19 @@ export const useTranscriptionStore = defineStore("transcription", () => {
       // Always use local volume-threshold detection to avoid external VAD runtime/CDN dependency.
       hearingStore.stopSpeechDetection();
       await hearingStore.start();
-      if (workletAvailable.value) {
-        await ensureCaptureSession();
+      if (workletAvailable.value && !workletCaptureDisabled) {
+        try {
+          await ensureCaptureSession();
+        } catch (err) {
+          const fallback = decideCaptureFallback({
+            workletError: err,
+            mediaRecorderSupported: recordingAvailable.value,
+          });
+          if (fallback.mode === "none") {
+            throw new Error(fallback.error || "Failed to start microphone listening.");
+          }
+          workletCaptureDisabled = true;
+        }
       }
     } catch (err) {
       hearingStore.stopSpeechDetection();
@@ -534,6 +590,7 @@ export const useTranscriptionStore = defineStore("transcription", () => {
         err instanceof Error
           ? err.message
           : "Failed to start microphone listening.";
+      listening.value = false;
     }
   }
 
@@ -548,6 +605,17 @@ export const useTranscriptionStore = defineStore("transcription", () => {
     await stopCapture();
   }
 
+  async function startMediaCapture() {
+    const started = await startRecording();
+    if (!started) {
+      captureActive = false;
+      captureMode = null;
+      return false;
+    }
+    captureMode = "media";
+    return true;
+  }
+
   async function startCapture() {
     if (captureActive) return;
     captureStartedAt = Date.now();
@@ -557,8 +625,24 @@ export const useTranscriptionStore = defineStore("transcription", () => {
     streamReady = false;
     captureActive = true;
 
-    if (workletAvailable.value) {
-      await ensureCaptureSession();
+    if (workletAvailable.value && !workletCaptureDisabled) {
+      try {
+        await ensureCaptureSession();
+      } catch (err) {
+        const fallback = decideCaptureFallback({
+          workletError: err,
+          mediaRecorderSupported: recordingAvailable.value,
+        });
+        if (fallback.mode === "none") {
+          error.value = fallback.error || "Recording is not supported in this environment.";
+          captureActive = false;
+          captureMode = null;
+          return;
+        }
+        workletCaptureDisabled = true;
+        await startMediaCapture();
+        return;
+      }
       captureMode = "worklet";
       if (useStreamingTransport.value) {
         try {
@@ -586,15 +670,7 @@ export const useTranscriptionStore = defineStore("transcription", () => {
       }
       return;
     }
-
-    if (!recordingAvailable.value) {
-      error.value = "Recording is not supported in this environment.";
-      captureActive = false;
-      return;
-    }
-
-    captureMode = "media";
-    await startRecording();
+    await startMediaCapture();
   }
 
   async function stopCapture() {
@@ -679,7 +755,7 @@ export const useTranscriptionStore = defineStore("transcription", () => {
 
   watch(language, (next) => {
     if (recognition) {
-      recognition.lang = next;
+      recognition.lang = normalizeTranscriptionLanguage(next);
     }
   });
 
@@ -750,6 +826,7 @@ export const useTranscriptionStore = defineStore("transcription", () => {
     listening,
     supported,
     canListen,
+    listeningSource,
     interimText,
     lastTranscript,
     error,

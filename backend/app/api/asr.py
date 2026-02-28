@@ -132,7 +132,17 @@ async def run_asr_engine_stream(websocket: WebSocket) -> None:
 
     try:
         while True:
-            message = await websocket.receive()
+            try:
+                message = await websocket.receive()
+            except WebSocketDisconnect:
+                break
+            except RuntimeError as exc:
+                if _is_disconnect_receive_runtime_error(exc):
+                    break
+                raise
+
+            if _is_websocket_disconnect_message(message):
+                break
 
             if message.get("text") is not None:
                 try:
@@ -229,8 +239,31 @@ async def run_asr_engine_stream(websocket: WebSocket) -> None:
     except Exception as exc:
         if aliyun_realtime_session is not None:
             await _close_aliyun_realtime_session(aliyun_realtime_session)
-        await websocket.send_json({"type": "error", "error": str(exc)})
-        await websocket.close(code=1011)
+        sent = await _safe_send_ws_error(websocket, str(exc))
+        if not sent:
+            return
+        try:
+            await websocket.close(code=1011)
+        except (RuntimeError, WebSocketDisconnect):
+            return
+
+
+def _is_websocket_disconnect_message(message: Dict[str, Any]) -> bool:
+    return isinstance(message, dict) and message.get("type") == "websocket.disconnect"
+
+
+def _is_disconnect_receive_runtime_error(exc: BaseException) -> bool:
+    if not isinstance(exc, RuntimeError):
+        return False
+    return "disconnect message has been received" in str(exc).lower()
+
+
+async def _safe_send_ws_error(websocket: WebSocket, error_message: str) -> bool:
+    try:
+        await websocket.send_json({"type": "error", "error": error_message})
+    except (RuntimeError, WebSocketDisconnect):
+        return False
+    return True
 
 
 def _resolve_engine_id(engine_id: str) -> str:

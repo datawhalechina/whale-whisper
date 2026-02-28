@@ -4,6 +4,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { SettingsLayout } from "@whalewhisper/stage-settings-ui";
 import { useI18n } from "@whalewhisper/app-core/composables/use-i18n";
 import { useLive2dRuntime } from "@whalewhisper/app-core/stores/live2d-runtime";
+import { useTranscriptionStore } from "@whalewhisper/app-core/stores/transcription";
 import { closeSettingsWindow } from "./services/desktop";
 import { listenDesktopActionToken } from "./services/desktop";
 import {
@@ -46,6 +47,12 @@ let unlistenActionToken: null | (() => void) = null;
 const dragIgnoreSelectors =
   "button, a, input, textarea, select, option, label, [contenteditable='true'], [role='button'], [role='link'], [role='slider'], [role='checkbox'], [role='switch'], [role='textbox'], [data-tauri-drag-region='false'], [data-drag-ignore='true']";
 const live2dRuntime = useLive2dRuntime();
+const transcriptionStore = useTranscriptionStore();
+
+function stopSettingsTestMic() {
+  if (transcriptionStore.listeningSource !== "settings-test") return;
+  void transcriptionStore.stopListening();
+}
 
 function isTauriRuntime() {
   if (typeof window === "undefined") return false;
@@ -101,7 +108,14 @@ async function pollCursorHover() {
 }
 
 async function handleClose() {
+  stopSettingsTestMic();
   await closeSettingsWindow();
+}
+
+function handleVisibilityChange() {
+  if (document.visibilityState === "hidden") {
+    stopSettingsTestMic();
+  }
 }
 
 onMounted(() => {
@@ -118,9 +132,11 @@ onMounted(() => {
       void pollCursorHover();
     }, 60);
   }
+  document.addEventListener("visibilitychange", handleVisibilityChange);
 });
 
 onUnmounted(() => {
+  stopSettingsTestMic();
   dragHandleEl?.removeEventListener("pointerdown", handleDragPointerDown);
   if (unlistenActionToken) {
     unlistenActionToken();
@@ -130,6 +146,7 @@ onUnmounted(() => {
     window.clearInterval(hoverTimer);
     hoverTimer = null;
   }
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
   dragHandleEl = null;
 });
 </script>

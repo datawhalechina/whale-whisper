@@ -12,6 +12,7 @@ import { storeToRefs } from "pinia";
 import { useI18n } from "@whalewhisper/app-core/composables/use-i18n";
 import { useTheme } from "@whalewhisper/app-core/composables/use-theme";
 import { useChatStore } from "@whalewhisper/app-core/stores/chat";
+import { useTranscriptionStore } from "@whalewhisper/app-core/stores/transcription";
 
 const props = defineProps<{
   visible: boolean;
@@ -23,7 +24,14 @@ const emit = defineEmits<{
 }>();
 
 const chatStore = useChatStore();
+const transcriptionStore = useTranscriptionStore();
 const { messages, sending, streamingMessage } = storeToRefs(chatStore);
+const {
+  listening: transcriptionListening,
+  listeningSource: transcriptionListeningSource,
+  canListen: canListenToTranscription,
+  error: transcriptionError,
+} = storeToRefs(transcriptionStore);
 const { t } = useI18n();
 const { isDark } = useTheme();
 
@@ -36,6 +44,19 @@ let dragStartScrollTop = 0;
 
 const showSendButton = computed(
   () => Boolean(messageInput.value.trim()) || isComposing.value
+);
+const chatMicActive = computed(
+  () =>
+    transcriptionListening.value &&
+    transcriptionListeningSource.value === "chat-input"
+);
+const chatMicButtonTitle = computed(() =>
+  chatMicActive.value ? t("audio.stt.stop") : t("audio.stt.start")
+);
+const showChatMicError = computed(
+  () =>
+    Boolean(transcriptionError.value) &&
+    transcriptionListeningSource.value === "chat-input"
 );
 
 const streaming = computed<ChatAssistantMessage>(() => {
@@ -78,6 +99,19 @@ function handleSend() {
 
   chatStore.send(messageInput.value);
   messageInput.value = "";
+}
+
+function toggleChatMic() {
+  if (!canListenToTranscription.value) return;
+  transcriptionStore.enabled = true;
+  if (chatMicActive.value) {
+    void transcriptionStore.stopListening();
+    return;
+  }
+  void transcriptionStore.startListening({
+    autoSend: true,
+    source: "chat-input",
+  });
 }
 
 function handleKeydown(event: KeyboardEvent) {
@@ -254,24 +288,41 @@ onMounted(scrollToBottom);
       </div>
     </div>
 
-    <div class="flex items-end gap-1">
-      <textarea
-        v-model="messageInput"
-        rows="1"
-        class="min-h-[34px] flex-1 resize-none rounded-xl border border-white/50 bg-white/70 px-3 py-2 text-sm text-neutral-700 shadow-sm outline-none backdrop-blur-md transition focus:border-primary-300 dark:border-neutral-700/60 dark:bg-neutral-900/70 dark:text-neutral-100 dark:focus:border-primary-400"
-        :placeholder="t('chat.input.placeholder')"
-        @keydown="handleKeydown"
-        @compositionstart="isComposing = true"
-        @compositionend="isComposing = false"
-      ></textarea>
-      <button
-        v-if="showSendButton"
-        type="button"
-        class="flex h-9 w-9 items-center justify-center rounded-full bg-primary-500/80 text-white shadow-sm transition hover:bg-primary-500 dark:bg-primary-400/80 dark:hover:bg-primary-400"
-        @click="handleSend"
-      >
-        <div class="i-solar:arrow-up-outline h-4 w-4" />
-      </button>
+    <div>
+      <div class="flex items-end gap-1">
+        <button
+          type="button"
+          class="mb-0.5 flex h-8 w-8 items-center justify-center rounded-full border border-white/60 bg-white/70 text-neutral-500 shadow-sm backdrop-blur-md transition hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700/60 dark:bg-neutral-900/70 dark:text-neutral-300 dark:hover:text-neutral-100"
+          :class="chatMicActive
+            ? 'border-primary-300/80 bg-primary-100/80 text-primary-600 dark:border-primary-300/70 dark:bg-primary-500/25 dark:text-primary-100'
+            : ''"
+          :title="chatMicButtonTitle"
+          :disabled="!canListenToTranscription"
+          @click="toggleChatMic"
+        >
+          <div :class="chatMicActive ? 'i-solar:microphone-bold' : 'i-solar:microphone-3-bold-duotone'" class="h-4 w-4" />
+        </button>
+        <textarea
+          v-model="messageInput"
+          rows="1"
+          class="min-h-[34px] flex-1 resize-none rounded-xl border border-white/50 bg-white/70 px-3 py-2 text-sm text-neutral-700 shadow-sm outline-none backdrop-blur-md transition focus:border-primary-300 dark:border-neutral-700/60 dark:bg-neutral-900/70 dark:text-neutral-100 dark:focus:border-primary-400"
+          :placeholder="t('chat.input.placeholder')"
+          @keydown="handleKeydown"
+          @compositionstart="isComposing = true"
+          @compositionend="isComposing = false"
+        ></textarea>
+        <button
+          v-if="showSendButton"
+          type="button"
+          class="flex h-9 w-9 items-center justify-center rounded-full bg-primary-500/80 text-white shadow-sm transition hover:bg-primary-500 dark:bg-primary-400/80 dark:hover:bg-primary-400"
+          @click="handleSend"
+        >
+          <div class="i-solar:arrow-up-outline h-4 w-4" />
+        </button>
+      </div>
+      <div v-if="showChatMicError" class="pt-1 text-[11px] text-rose-500">
+        {{ transcriptionError }}
+      </div>
     </div>
   </div>
 </template>

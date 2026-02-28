@@ -2,6 +2,7 @@
 import { storeToRefs } from "pinia";
 import { computed, ref } from "vue";
 import { useI18n } from "@whalewhisper/app-core/composables/use-i18n";
+import { useTranscriptionStore } from "@whalewhisper/app-core/stores/transcription";
 import { useUiStore } from "@whalewhisper/app-core/stores/ui";
 import { SettingsLayout } from "@whalewhisper/stage-settings-ui";
 import LanguageSelect from "../layouts/LanguageSelect.vue";
@@ -19,6 +20,7 @@ import {
 
 const uiStore = useUiStore();
 const { settingsOpen } = storeToRefs(uiStore);
+const transcriptionStore = useTranscriptionStore();
 const { t } = useI18n();
 const tabs = computed(() => [
   { id: "appearance", label: t("settings.tabs.appearance"), component: AppearanceSection },
@@ -40,6 +42,9 @@ const dialogPaddingClass = computed(() =>
 );
 
 function handleClose() {
+  if (transcriptionStore.listeningSource === "settings-test") {
+    void transcriptionStore.stopListening();
+  }
   uiStore.closeSettings();
 }
 </script>
