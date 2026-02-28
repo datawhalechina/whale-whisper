@@ -74,21 +74,6 @@ def _aliyun_nls_default_field_dicts() -> List[Dict[str, Any]]:
             "options": [],
             "optionsSource": None,
         },
-        {
-            "id": "model",
-            "label": "Model",
-            "type": "select",
-            "required": False,
-            "placeholder": None,
-            "default": "qwen3-asr-flash-realtime",
-            "description": None,
-            "scope": "config",
-            "options": [
-                {"id": "qwen3-asr-flash-realtime", "label": "qwen3-asr-flash-realtime", "description": None, "icon": None},
-                {"id": "qwen3-asr-flash", "label": "qwen3-asr-flash", "description": None, "icon": None},
-            ],
-            "optionsSource": None,
-        },
     ]
 
 
@@ -97,7 +82,7 @@ def _resolve_provider_field_dicts(spec) -> List[Dict[str, Any]]:
     if spec.id != ALIYUN_NLS_PROVIDER_ID:
         return fields
 
-    # Keep UI minimal for this provider: only API key and model are exposed.
+    # Keep UI minimal for this provider: only API key is exposed.
     return _aliyun_nls_default_field_dicts()
 
 

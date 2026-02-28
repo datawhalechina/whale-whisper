@@ -1136,14 +1136,11 @@ export const fallbackProviderCatalog: ProviderCatalogEntry[] = [
   },
   {
     "id": "aliyun-nls-transcription",
-    "label": "阿里百炼",
+    "label": "Alibaba Cloud Model Studio",
     "category": "transcription",
     "icon": "i-lobe-icons:alibabacloud",
     "description": "Alibaba Bailian ASR transcription.",
     "engineId": "aliyun-nls-asr",
-    "defaults": {
-      "model": "qwen3-asr-flash-realtime"
-    },
     "fields": [
       {
         "id": "apiKey",
@@ -1151,23 +1148,6 @@ export const fallbackProviderCatalog: ProviderCatalogEntry[] = [
         "type": "secret",
         "required": true,
         "scope": "config"
-      },
-      {
-        "id": "model",
-        "label": "Model",
-        "type": "select",
-        "scope": "config",
-        "default": "qwen3-asr-flash-realtime",
-        "options": [
-          {
-            "id": "qwen3-asr-flash-realtime",
-            "label": "qwen3-asr-flash-realtime"
-          },
-          {
-            "id": "qwen3-asr-flash",
-            "label": "qwen3-asr-flash"
-          }
-        ]
       }
     ]
   },

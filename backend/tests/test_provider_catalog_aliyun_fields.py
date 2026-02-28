@@ -42,8 +42,9 @@ def test_aliyun_catalog_fields_are_normalized_when_openai_style_fields_present()
     fields = _resolve_provider_field_dicts(spec)
     field_ids = [item["id"] for item in fields]
 
-    assert field_ids == ["apiKey", "model"]
+    assert field_ids == ["apiKey"]
     assert "baseUrl" not in field_ids
+    assert "model" not in field_ids
 
 
 def test_aliyun_catalog_fields_are_forced_to_minimal_shape():
@@ -61,7 +62,7 @@ def test_aliyun_catalog_fields_are_forced_to_minimal_shape():
     fields = _resolve_provider_field_dicts(spec)
     field_ids = [item["id"] for item in fields]
 
-    assert field_ids == ["apiKey", "model"]
+    assert field_ids == ["apiKey"]
 
 
 if __name__ == "__main__":

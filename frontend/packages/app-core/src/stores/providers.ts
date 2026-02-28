@@ -18,6 +18,7 @@ import {
 } from "../services/providers";
 import { useI18n } from "../composables/use-i18n";
 import { formatHealthError, formatHealthMessage } from "../utils/health";
+import { filterProviderFields } from "../utils/provider-fields";
 import { useSettingsStore } from "./settings";
 
 export type ProviderStatus = "online" | "offline";
@@ -48,17 +49,6 @@ const aliyunNlsNormalizedFields: ProviderField[] = [
     type: "secret",
     required: true,
     scope: "config",
-  },
-  {
-    id: "model",
-    label: "Model",
-    type: "select",
-    default: "qwen3-asr-flash-realtime",
-    scope: "config",
-    options: [
-      { id: "qwen3-asr-flash-realtime", label: "qwen3-asr-flash-realtime" },
-      { id: "qwen3-asr-flash", label: "qwen3-asr-flash" },
-    ],
   },
 ];
 
@@ -271,7 +261,7 @@ export const useProvidersStore = defineStore("providers", () => {
 
   function getProviderFields(providerId: string) {
     const option = getProviderMetadata(providerId);
-    return option?.fields ?? [];
+    return filterProviderFields(option);
   }
 
   function getProviderFieldValue(providerId: string, field: ProviderField) {
@@ -572,12 +562,28 @@ export const useProvidersStore = defineStore("providers", () => {
   }
 
   const pendingRefreshIds = new Set<string>();
+  function queueProviderRefresh(providerId: string) {
+    if (!providerId) return;
+    ensureProvider(providerId);
+    ensureDefaultConfig(providerId);
+    pendingRefreshIds.add(providerId);
+  }
+
   const flushRefreshQueue = useDebounceFn(() => {
     pendingRefreshIds.forEach((providerId) => {
       void refreshProvider(providerId);
     });
     pendingRefreshIds.clear();
   }, 600);
+
+  watch(
+    () => [settingsStore.chatProviderId, settingsStore.speechProviderId, settingsStore.transcriptionProviderId],
+    (providerIds) => {
+      providerIds.forEach((providerId) => queueProviderRefresh(providerId));
+      flushRefreshQueue();
+    },
+    { immediate: true }
+  );
 
   watch(
     providerConfigs,
@@ -589,7 +595,7 @@ export const useProvidersStore = defineStore("providers", () => {
         const nextConfig = next?.[key];
         const prevConfig = prev?.[key];
         if (JSON.stringify(nextConfig) !== JSON.stringify(prevConfig)) {
-          pendingRefreshIds.add(key);
+          queueProviderRefresh(key);
         }
       });
       flushRefreshQueue();

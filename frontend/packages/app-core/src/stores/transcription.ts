@@ -8,6 +8,8 @@ import {
   createAudioCaptureSession,
   pcm16ToWavBlob,
 } from "../utils/audio-stream";
+import { shouldAutoRestartBrowserRecognition } from "../utils/browser-recognition-restart";
+import { sanitizeTranscript } from "../utils/transcript-filter";
 import { useChatStore } from "./chat";
 import { useHearingStore } from "./hearing";
 import { useProvidersStore } from "./providers";
@@ -21,6 +23,7 @@ type RecordingResult = {
 };
 
 type CaptureMode = "worklet" | "media";
+const BROWSER_RECOGNITION_RESTART_DELAY_MS = 250;
 
 export const useTranscriptionStore = defineStore("transcription", () => {
   const chatStore = useChatStore();
@@ -96,6 +99,10 @@ export const useTranscriptionStore = defineStore("transcription", () => {
   let recorderStartedAt = 0;
   let silenceTimer: number | null = null;
   let restoreHearingEnabled: boolean | null = null;
+  let browserRecognitionSessionRequested = false;
+  let manualBrowserRecognitionStop = false;
+  let recognitionRestartTimer: number | null = null;
+  let lastBrowserRecognitionErrorCode: string | null = null;
 
   let captureSession: Awaited<ReturnType<typeof createAudioCaptureSession>> | null = null;
   let captureActive = false;
@@ -113,6 +120,67 @@ export const useTranscriptionStore = defineStore("transcription", () => {
   const silenceStopMs = computed(() =>
     Math.max(200, Number(vadSilenceMs.value) || 700)
   );
+
+  function applyTranscript(raw: string) {
+    const transcript = sanitizeTranscript(raw);
+    if (!transcript) {
+      return;
+    }
+    lastTranscript.value = transcript;
+    interimText.value = "";
+    if (autoSend.value) {
+      chatStore.send(transcript);
+    }
+  }
+
+  function shouldRestartBrowserRecognition() {
+    return shouldAutoRestartBrowserRecognition({
+      userRequested: browserRecognitionSessionRequested,
+      manuallyStopped: manualBrowserRecognitionStop,
+      enabled: enabled.value,
+      supported: supported.value,
+      useBrowserRecognition: useBrowserRecognition.value,
+      lastErrorCode: lastBrowserRecognitionErrorCode,
+    });
+  }
+
+  function clearRecognitionRestartTimer() {
+    if (typeof window === "undefined") return;
+    if (recognitionRestartTimer) {
+      window.clearTimeout(recognitionRestartTimer);
+      recognitionRestartTimer = null;
+    }
+  }
+
+  function startBrowserRecognitionSession() {
+    const recognizer = ensureRecognition();
+    if (!recognizer) return;
+    recognizer.lang = language.value;
+    try {
+      recognizer.start();
+    } catch (err) {
+      const name = err instanceof DOMException ? err.name : "";
+      if (name === "InvalidStateError") {
+        listening.value = true;
+        return;
+      }
+      error.value = err instanceof Error ? err.message : "Speech recognition error.";
+      listening.value = false;
+    }
+  }
+
+  function scheduleBrowserRecognitionRestart() {
+    if (typeof window === "undefined") return;
+    clearRecognitionRestartTimer();
+    recognitionRestartTimer = window.setTimeout(() => {
+      recognitionRestartTimer = null;
+      if (!shouldRestartBrowserRecognition()) {
+        listening.value = false;
+        return;
+      }
+      startBrowserRecognitionSession();
+    }, BROWSER_RECOGNITION_RESTART_DELAY_MS);
+  }
 
   function getRecognitionCtor(): SpeechRecognitionCtor | null {
     if (typeof window === "undefined") return null;
@@ -141,13 +209,21 @@ export const useTranscriptionStore = defineStore("transcription", () => {
     recognition.onstart = () => {
       listening.value = true;
       error.value = null;
+      lastBrowserRecognitionErrorCode = null;
     };
 
     recognition.onend = () => {
+      if (shouldRestartBrowserRecognition()) {
+        listening.value = true;
+        scheduleBrowserRecognitionRestart();
+        return;
+      }
       listening.value = false;
     };
 
     recognition.onerror = (event) => {
+      lastBrowserRecognitionErrorCode =
+        typeof event.error === "string" ? event.error : null;
       error.value = event.error || "Speech recognition error.";
       listening.value = false;
     };
@@ -166,13 +242,9 @@ export const useTranscriptionStore = defineStore("transcription", () => {
         }
       }
 
-      interimText.value = interim.trim();
+      interimText.value = sanitizeTranscript(interim);
       if (finalText.trim()) {
-        lastTranscript.value = finalText.trim();
-        interimText.value = "";
-        if (autoSend.value) {
-          chatStore.send(lastTranscript.value);
-        }
+        applyTranscript(finalText);
       }
     };
 
@@ -241,10 +313,11 @@ export const useTranscriptionStore = defineStore("transcription", () => {
     await hearingStore.start();
 
     if (useBrowserRecognition.value && supported.value) {
-      const recognizer = ensureRecognition();
-      if (!recognizer) return;
-      recognizer.lang = language.value;
-      recognizer.start();
+      browserRecognitionSessionRequested = true;
+      manualBrowserRecognitionStop = false;
+      lastBrowserRecognitionErrorCode = null;
+      clearRecognitionRestartTimer();
+      startBrowserRecognitionSession();
       return;
     }
 
@@ -255,6 +328,9 @@ export const useTranscriptionStore = defineStore("transcription", () => {
     listening.value = false;
 
     if (useBrowserRecognition.value) {
+      browserRecognitionSessionRequested = false;
+      manualBrowserRecognitionStop = true;
+      clearRecognitionRestartTimer();
       recognition?.stop();
     } else {
       await stopVad();
@@ -386,11 +462,7 @@ export const useTranscriptionStore = defineStore("transcription", () => {
       });
       const transcript = extractTranscript(payload);
       if (transcript) {
-        lastTranscript.value = transcript;
-        interimText.value = "";
-        if (autoSend.value) {
-          chatStore.send(transcript);
-        }
+        applyTranscript(transcript);
       }
     } catch (err) {
       error.value = err instanceof Error ? err.message : "Transcription failed.";
@@ -425,9 +497,9 @@ export const useTranscriptionStore = defineStore("transcription", () => {
   }
 
   function extractTranscript(payload: Record<string, any>) {
-    if (typeof payload.text === "string") return payload.text.trim();
+    if (typeof payload.text === "string") return sanitizeTranscript(payload.text);
     const data = payload.data;
-    if (data && typeof data.text === "string") return data.text.trim();
+    if (data && typeof data.text === "string") return sanitizeTranscript(data.text);
     return "";
   }
 
@@ -546,11 +618,7 @@ export const useTranscriptionStore = defineStore("transcription", () => {
         const payload = await streamConnection.result;
         const transcript = extractTranscript(payload);
         if (transcript) {
-          lastTranscript.value = transcript;
-          interimText.value = "";
-          if (autoSend.value) {
-            chatStore.send(transcript);
-          }
+          applyTranscript(transcript);
         }
         streamSucceeded = true;
       } catch (err) {
@@ -574,11 +642,7 @@ export const useTranscriptionStore = defineStore("transcription", () => {
         });
         const transcript = extractTranscript(payload);
         if (transcript) {
-          lastTranscript.value = transcript;
-          interimText.value = "";
-          if (autoSend.value) {
-            chatStore.send(transcript);
-          }
+          applyTranscript(transcript);
         }
       } catch (err) {
         error.value = err instanceof Error ? err.message : "Transcription failed.";
@@ -642,6 +706,7 @@ export const useTranscriptionStore = defineStore("transcription", () => {
   );
 
   onScopeDispose(() => {
+    clearRecognitionRestartTimer();
     void stopListening();
     recognition = null;
     cleanupRecorder();

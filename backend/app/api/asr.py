@@ -442,6 +442,7 @@ def _resolve_audio_format(filename: str, content_type: str) -> str:
 
 DASHSCOPE_CN_BASE = "https://dashscope.aliyuncs.com"
 DASHSCOPE_INTL_BASE = "https://dashscope-intl.aliyuncs.com"
+ALIYUN_ASR_REALTIME_MODEL = "qwen3-asr-flash-realtime"
 
 
 @dataclass
@@ -478,11 +479,7 @@ def _resolve_aliyun_dashscope_credentials(config, overrides: Dict[str, Any]) -> 
     if not api_key:
         raise HTTPException(status_code=400, detail="Alibaba Bailian ASR missing apiKey")
 
-    model = str(
-        _first_present(params, "model")
-        or config.model
-        or "qwen3-asr-flash-realtime"
-    ).strip()
+    model = ALIYUN_ASR_REALTIME_MODEL
     if not model:
         raise HTTPException(status_code=400, detail="Alibaba Bailian ASR missing model")
 
@@ -504,10 +501,10 @@ def _build_aliyun_dashscope_urls(base_url: str) -> Dict[str, str]:
 def _resolve_aliyun_realtime_model(model: str) -> str:
     normalized = (model or "").strip()
     if not normalized:
-        return "qwen3-asr-flash-realtime"
+        return ALIYUN_ASR_REALTIME_MODEL
     if "realtime" in normalized.lower():
         return normalized
-    return "qwen3-asr-flash-realtime"
+    return ALIYUN_ASR_REALTIME_MODEL
 
 
 def _resolve_aliyun_non_realtime_model(model: str) -> str:
