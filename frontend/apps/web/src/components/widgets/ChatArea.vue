@@ -90,7 +90,13 @@ function toggleChatMic() {
         :disabled="!canListenToTranscription"
         @click="toggleChatMic"
       >
-        <div :class="chatMicActive ? 'i-solar:microphone-bold' : 'i-solar:microphone-3-bold-duotone'" class="h-4 w-4" />
+        <span class="relative inline-flex h-4 w-4 items-center justify-center">
+          <div class="i-solar:microphone-bold h-4 w-4" />
+          <span
+            v-if="!chatMicActive"
+            class="pointer-events-none absolute left-0 top-1/2 h-[2px] w-full -translate-y-1/2 rotate-[-38deg] rounded-full bg-current opacity-90"
+          />
+        </span>
       </button>
       <BasicTextarea
         v-model="messageInput"
@@ -134,13 +140,21 @@ function toggleChatMic() {
   <div v-else flex gap-2 class="ph-no-capture lt-md:h-full">
     <button
       type="button"
-      class="mb-4 flex h-9 w-9 items-center justify-center self-end rounded-full border border-primary-300/40 bg-primary-100/70 text-primary-700 shadow-sm backdrop-blur-md transition hover:bg-primary-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-primary-400/30 dark:bg-primary-500/20 dark:text-primary-100 dark:hover:bg-primary-500/30"
-      :class="chatMicActive ? 'ring-2 ring-primary-300/70 dark:ring-primary-300/60' : ''"
+      class="mb-4 flex h-9 w-9 items-center justify-center self-end rounded-full border border-neutral-200/70 bg-white/70 text-neutral-500 shadow-sm backdrop-blur-md transition hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700/70 dark:bg-neutral-900/70 dark:text-neutral-200 dark:hover:text-neutral-50"
+      :class="chatMicActive
+        ? 'border-primary-300/80 bg-primary-100/80 text-primary-600 ring-2 ring-primary-300/70 dark:border-primary-300/70 dark:bg-primary-500/20 dark:text-primary-100 dark:ring-primary-300/60'
+        : ''"
       :title="chatMicButtonTitle"
       :disabled="!canListenToTranscription"
       @click="toggleChatMic"
     >
-      <div :class="chatMicActive ? 'i-solar:microphone-bold' : 'i-solar:microphone-3-bold-duotone'" class="h-5 w-5" />
+      <span class="relative inline-flex h-5 w-5 items-center justify-center">
+        <div class="i-solar:microphone-bold h-5 w-5" />
+        <span
+          v-if="!chatMicActive"
+          class="pointer-events-none absolute left-0 top-1/2 h-[2px] w-full -translate-y-1/2 rotate-[-38deg] rounded-full bg-current opacity-90"
+        />
+      </span>
     </button>
     <div
       :class="[

@@ -300,7 +300,23 @@ onMounted(scrollToBottom);
           :disabled="!canListenToTranscription"
           @click="toggleChatMic"
         >
-          <div :class="chatMicActive ? 'i-solar:microphone-bold' : 'i-solar:microphone-3-bold-duotone'" class="h-4 w-4" />
+          <span class="relative inline-flex h-4 w-4 items-center justify-center">
+            <div class="i-solar:microphone-bold h-4 w-4" />
+            <svg
+              v-if="!chatMicActive"
+              class="pointer-events-none absolute inset-0 h-4 w-4 text-rose-500/90 dark:text-rose-300/90"
+              viewBox="0 0 16 16"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M2 14L14 2"
+                stroke="currentColor"
+                stroke-width="2.2"
+                stroke-linecap="round"
+              />
+            </svg>
+          </span>
         </button>
         <textarea
           v-model="messageInput"
