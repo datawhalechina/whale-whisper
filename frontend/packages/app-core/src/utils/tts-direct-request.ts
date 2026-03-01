@@ -30,7 +30,6 @@ const allowedBackendTtsEngineIds = new Set([
   "volcengine-speech",
   "alibaba-cloud-model-studio-speech",
 ]);
-const legacyUnspeechHost = "unspeech.hyp3r.link";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -74,28 +73,6 @@ function normalizeAlibabaModelId(model: string, engineId: string) {
   return model.replace(/^alibaba\//i, "").trim();
 }
 
-function normalizeLegacyUnspeechBaseUrl(engineId: string, baseUrl: string) {
-  const normalized = baseUrl.trim();
-  if (!normalized) return normalized;
-
-  try {
-    const parsed = new URL(normalized);
-    if (parsed.hostname.toLowerCase() !== legacyUnspeechHost) {
-      return normalized;
-    }
-  } catch {
-    return normalized;
-  }
-
-  if (engineId === "volcengine-speech") {
-    return "https://openspeech.bytedance.com/api/v1/tts";
-  }
-  if (engineId === "alibaba-cloud-model-studio-speech") {
-    return "https://dashscope.aliyuncs.com";
-  }
-  return normalized;
-}
-
 function resolveVolcengineAppId(config: Record<string, unknown>) {
   const topLevel = readString(config, ["appId", "appid", "app_id"]);
   if (topLevel) return topLevel;
@@ -132,10 +109,6 @@ export function buildDirectTtsHttpRequest(input: {
   const config = asRecord(input.config);
   const apiBaseUrl = (input.apiBaseUrl || "").trim();
   const apiKey = readString(config, ["apiKey", "api_key"]);
-  const baseUrl = normalizeLegacyUnspeechBaseUrl(
-    engineId,
-    readString(config, ["baseUrl", "base_url"])
-  );
   const model = normalizeAlibabaModelId(readString(config, ["model"]), engineId);
   const voice = readString(config, ["voice"]);
   const text = (input.text || "").trim();
@@ -149,10 +122,6 @@ export function buildDirectTtsHttpRequest(input: {
     model,
     voice,
   };
-
-  if (baseUrl) {
-    backendConfig.baseUrl = baseUrl;
-  }
 
   const responseFormat = readString(config, ["response_format", "responseFormat", "format"]);
   if (responseFormat) {

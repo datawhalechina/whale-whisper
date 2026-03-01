@@ -80,7 +80,7 @@ run("builds backend relay request for alibaba speech engine", () => {
   });
 });
 
-run("normalizes legacy unspeech base url to provider official endpoint", () => {
+run("does not forward base url for fixed direct providers", () => {
   const volcRequest = buildDirectTtsHttpRequest({
     text: "hello",
     engineId: "volcengine-speech",
@@ -94,10 +94,7 @@ run("normalizes legacy unspeech base url to provider official endpoint", () => {
     },
   });
   assert.ok(volcRequest);
-  assert.equal(
-    (volcRequest?.body.config as { baseUrl?: string }).baseUrl,
-    "https://openspeech.bytedance.com/api/v1/tts"
-  );
+  assert.equal((volcRequest?.body.config as { baseUrl?: string }).baseUrl, undefined);
 
   const alibabaRequest = buildDirectTtsHttpRequest({
     text: "hello",
@@ -111,10 +108,7 @@ run("normalizes legacy unspeech base url to provider official endpoint", () => {
     },
   });
   assert.ok(alibabaRequest);
-  assert.equal(
-    (alibabaRequest?.body.config as { baseUrl?: string }).baseUrl,
-    "https://dashscope.aliyuncs.com"
-  );
+  assert.equal((alibabaRequest?.body.config as { baseUrl?: string }).baseUrl, undefined);
 });
 
 run("builds legacy synthesize fallback request from backend relay request", () => {
@@ -142,8 +136,6 @@ run("builds legacy synthesize fallback request from backend relay request", () =
     config: {
       apiKey: "token-123",
       api_key: "token-123",
-      baseUrl: "https://unspeech.example/v1",
-      base_url: "https://unspeech.example/v1",
       model: "volcengine/v1",
       voice: "zh_female_test",
       appId: "appid-xyz",

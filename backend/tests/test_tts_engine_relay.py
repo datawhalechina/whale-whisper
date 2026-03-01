@@ -12,6 +12,7 @@ from app.api.tts import (  # noqa: E402
     _extract_json_error_message,
     _extract_tts_input,
     _normalize_alibaba_provider_model,
+    _resolve_volcengine_tts_url,
     _resolve_alibaba_tts_ws_url,
     _resolve_tts_api_key,
 )
@@ -139,6 +140,22 @@ def test_build_volcengine_provider_payload_direct():
     assert payload["request"]["text"] == "hello volcengine direct"
 
 
+def test_resolve_volcengine_tts_url_ignores_client_url_override():
+    runtime = EngineRuntimeConfig(
+        id="volcengine-speech",
+        base_url="https://openspeech.bytedance.com/api/v1/tts",
+        model="v1",
+    )
+    url = _resolve_volcengine_tts_url(
+        runtime,
+        {
+            "volcengine_url": "https://attacker.example/tts",
+            "provider_url": "https://attacker-2.example/tts",
+        },
+    )
+    assert url == "https://openspeech.bytedance.com/api/v1/tts"
+
+
 def test_resolve_alibaba_tts_ws_url_prefers_intl_region():
     runtime = EngineRuntimeConfig(
         id="alibaba-cloud-model-studio-speech",
@@ -147,6 +164,23 @@ def test_resolve_alibaba_tts_ws_url_prefers_intl_region():
     )
     ws_url = _resolve_alibaba_tts_ws_url(runtime, {"region": "intl"})
     assert ws_url == "wss://dashscope-intl.aliyuncs.com/api-ws/v1/inference"
+
+
+def test_resolve_alibaba_tts_ws_url_ignores_client_url_override():
+    runtime = EngineRuntimeConfig(
+        id="alibaba-cloud-model-studio-speech",
+        base_url="https://dashscope.aliyuncs.com",
+        model="cosyvoice-v1",
+    )
+    ws_url = _resolve_alibaba_tts_ws_url(
+        runtime,
+        {
+            "ws_url": "wss://attacker.example/ws",
+            "dashscope_ws_url": "wss://attacker-2.example/ws",
+            "baseUrl": "https://dashscope-intl.aliyuncs.com",
+        },
+    )
+    assert ws_url == "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
 
 
 def test_normalize_alibaba_provider_model_strips_provider_prefix():
@@ -182,7 +216,15 @@ if __name__ == "__main__":
     run("build unspeech payload for volcengine", test_build_unspeech_payload_for_volcengine)
     run("build unspeech payload for alibaba", test_build_unspeech_payload_for_alibaba)
     run("build volcengine provider payload direct", test_build_volcengine_provider_payload_direct)
+    run(
+        "resolve volcengine tts url ignores client url override",
+        test_resolve_volcengine_tts_url_ignores_client_url_override,
+    )
     run("resolve alibaba tts ws url prefers intl region", test_resolve_alibaba_tts_ws_url_prefers_intl_region)
+    run(
+        "resolve alibaba tts ws url ignores client url override",
+        test_resolve_alibaba_tts_ws_url_ignores_client_url_override,
+    )
     run("normalize alibaba provider model strips provider prefix", test_normalize_alibaba_provider_model_strips_provider_prefix)
     run("extract json error message from errors array", test_extract_json_error_message_from_errors_array)
     run("decorate tts error for volcengine grant issue", test_decorate_tts_error_for_volcengine_grant_issue)

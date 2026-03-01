@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -56,6 +57,8 @@ LOCAL_TTS_VOICE_FILES = {
     "volcengine-speech": LOCAL_TTS_VOICES_DIR / "volcengine.json",
     "alibaba-cloud-model-studio-speech": LOCAL_TTS_VOICES_DIR / "alibaba.json",
 }
+_LAST_GOOD_LOCAL_TTS_VOICES: Dict[str, List[dict]] = {}
+logger = logging.getLogger(__name__)
 
 
 class ProviderRegistry:
@@ -190,19 +193,47 @@ async def _load_local_tts_voices(provider_id: str) -> List[dict]:
     path = LOCAL_TTS_VOICE_FILES.get(provider_id)
     if not path:
         return []
-    return _load_local_tts_voices_cached(provider_id, str(path))
 
-
-@lru_cache(maxsize=8)
-def _load_local_tts_voices_cached(provider_id: str, path: str) -> List[dict]:
     source = Path(path)
-    if not source.exists():
-        return []
-
     try:
-        raw = json.loads(source.read_text(encoding="utf-8"))
-    except Exception:
+        mtime_ns = source.stat().st_mtime_ns
+        voices = _load_local_tts_voices_cached(provider_id, str(source), mtime_ns)
+    except FileNotFoundError:
+        logger.warning("Local TTS voices file not found for provider=%s path=%s", provider_id, source)
+        return _load_last_good_local_tts_voices(provider_id)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        logger.exception(
+            "Failed to load local TTS voices for provider=%s path=%s",
+            provider_id,
+            source,
+            exc_info=exc,
+        )
+        return _load_last_good_local_tts_voices(provider_id)
+    except Exception as exc:
+        logger.exception(
+            "Unexpected error while loading local TTS voices for provider=%s path=%s",
+            provider_id,
+            source,
+            exc_info=exc,
+        )
+        return _load_last_good_local_tts_voices(provider_id)
+
+    _LAST_GOOD_LOCAL_TTS_VOICES[provider_id] = list(voices)
+    return list(voices)
+
+
+def _load_last_good_local_tts_voices(provider_id: str) -> List[dict]:
+    voices = _LAST_GOOD_LOCAL_TTS_VOICES.get(provider_id)
+    if not voices:
         return []
+    return list(voices)
+
+
+@lru_cache(maxsize=16)
+def _load_local_tts_voices_cached(provider_id: str, path: str, mtime_ns: int) -> List[dict]:
+    source = Path(path)
+    _ = mtime_ns
+    raw = json.loads(source.read_text(encoding="utf-8"))
 
     if provider_id == "alibaba-cloud-model-studio-speech":
         return _parse_alibaba_voices(raw)

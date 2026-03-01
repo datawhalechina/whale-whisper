@@ -454,9 +454,6 @@ def _resolve_tts_media_type(format_name: str) -> str:
 
 
 def _resolve_volcengine_tts_url(runtime_config, overrides: Dict[str, Any]) -> str:
-    explicit = _read_string(overrides, "volcengine_url", "volcengineUrl", "provider_url", "providerUrl")
-    if explicit:
-        return explicit
     base_url = str(runtime_config.base_url or "").strip().lower()
     if "openspeech.bytedance.com" in base_url:
         return runtime_config.base_url.rstrip("/")
@@ -464,13 +461,8 @@ def _resolve_volcengine_tts_url(runtime_config, overrides: Dict[str, Any]) -> st
 
 
 def _resolve_alibaba_tts_ws_url(runtime_config, overrides: Dict[str, Any]) -> str:
-    explicit = _read_string(overrides, "dashscope_ws_url", "dashscopeWsUrl", "ws_url", "wsUrl")
-    if explicit:
-        return explicit
-
-    explicit_base = _read_string(overrides, "base_url", "baseUrl", "dashscope_base_url", "dashscopeBaseUrl")
     runtime_base = str(runtime_config.base_url or "").strip()
-    normalized_base = (explicit_base or runtime_base).lower()
+    normalized_base = runtime_base.lower()
 
     region = _read_string(overrides, "region").lower()
     if region in {"intl", "sg", "singapore", "intl-singapore", "ap-southeast-1"}:
