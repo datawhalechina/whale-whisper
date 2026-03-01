@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  buildLegacyTtsHttpRequest,
   buildDirectTtsHttpRequest,
   supportsDirectTts,
 } from "../utils/tts-direct-request.ts";
@@ -15,17 +16,75 @@ function run(name: string, fn: () => void) {
   }
 }
 
-run("supports direct tts for volcengine speech engine", () => {
+run("supports backend relay tts engines", () => {
   assert.equal(supportsDirectTts("volcengine-speech"), true);
-  assert.equal(supportsDirectTts("openai-tts"), true);
   assert.equal(supportsDirectTts("alibaba-cloud-model-studio-speech"), true);
+  assert.equal(supportsDirectTts("openai-tts"), false);
   assert.equal(supportsDirectTts("unknown-engine"), false);
 });
 
-run("builds direct volcengine request with unspeech extra_body appid", () => {
+run("builds backend relay request for volcengine speech engine", () => {
   const request = buildDirectTtsHttpRequest({
     text: "hello",
     engineId: "volcengine-speech",
+    apiBaseUrl: "http://localhost:8090",
+    config: {
+      apiKey: "token-123",
+      model: "v1",
+      voice: "zh_female_test",
+      appId: "appid-xyz",
+    },
+  });
+
+  assert.ok(request);
+  assert.equal(request?.url, "http://localhost:8090/api/tts/engines");
+  assert.equal(request?.headers.Authorization, undefined);
+  assert.deepEqual(request?.body, {
+    engine: "volcengine-speech",
+    data: "hello",
+    config: {
+      apiKey: "token-123",
+      model: "v1",
+      voice: "zh_female_test",
+      appId: "appid-xyz",
+    },
+  });
+});
+
+run("builds backend relay request for alibaba speech engine", () => {
+  const request = buildDirectTtsHttpRequest({
+    text: "hello",
+    engineId: "alibaba-cloud-model-studio-speech",
+    apiBaseUrl: "http://localhost:8090/",
+    config: {
+      apiKey: "token-123",
+      model: "alibaba/cosyvoice-v1",
+      voice: "longxiaochun_v2",
+      rate: 1.2,
+      pitch: 0.9,
+    },
+  });
+
+  assert.ok(request);
+  assert.equal(request?.url, "http://localhost:8090/api/tts/engines");
+  assert.deepEqual(request?.body, {
+    engine: "alibaba-cloud-model-studio-speech",
+    data: "hello",
+    config: {
+      apiKey: "token-123",
+      model: "cosyvoice-v1",
+      voice: "longxiaochun_v2",
+      rate: 1.2,
+      pitch: 0.9,
+    },
+  });
+});
+
+run("normalizes legacy unspeech base url to provider official endpoint", () => {
+  const volcRequest = buildDirectTtsHttpRequest({
+    text: "hello",
+    engineId: "volcengine-speech",
+    apiBaseUrl: "http://localhost:8090",
     config: {
       apiKey: "token-123",
       baseUrl: "https://unspeech.hyp3r.link/v1/",
@@ -34,56 +93,80 @@ run("builds direct volcengine request with unspeech extra_body appid", () => {
       appId: "appid-xyz",
     },
   });
-
-  assert.ok(request);
-  assert.equal(request?.url, "https://unspeech.hyp3r.link/v1/audio/speech");
-  assert.equal(request?.headers.Authorization, "Bearer token-123");
-  assert.equal(request?.body.model, "volcengine/v1");
-  assert.equal(request?.body.voice, "zh_female_test");
+  assert.ok(volcRequest);
   assert.equal(
-    (request?.body.extra_body as { app?: { appid?: string } })?.app?.appid,
-    "appid-xyz"
+    (volcRequest?.body.config as { baseUrl?: string }).baseUrl,
+    "https://openspeech.bytedance.com/api/v1/tts"
   );
-});
 
-run("builds direct alibaba request and normalizes model prefix", () => {
-  const request = buildDirectTtsHttpRequest({
+  const alibabaRequest = buildDirectTtsHttpRequest({
     text: "hello",
     engineId: "alibaba-cloud-model-studio-speech",
+    apiBaseUrl: "http://localhost:8090",
     config: {
       apiKey: "token-123",
       baseUrl: "https://unspeech.hyp3r.link/v1/",
       model: "cosyvoice-v1",
-      voice: "longxiaochun_v2",
-      rate: 1.2,
-      pitch: 0.9,
+      voice: "longwan",
     },
   });
-
-  assert.ok(request);
-  assert.equal(request?.body.model, "alibaba/cosyvoice-v1");
-  assert.equal(request?.body.voice, "longxiaochun_v2");
+  assert.ok(alibabaRequest);
   assert.equal(
-    (request?.body.extra_body as { rate?: number })?.rate,
-    1.2
+    (alibabaRequest?.body.config as { baseUrl?: string }).baseUrl,
+    "https://dashscope.aliyuncs.com"
   );
 });
 
-run("builds direct openai-tts request", () => {
+run("builds legacy synthesize fallback request from backend relay request", () => {
   const request = buildDirectTtsHttpRequest({
-    text: "hello",
-    engineId: "openai-tts",
+    text: "fallback test",
+    engineId: "volcengine-speech",
+    apiBaseUrl: "http://localhost:8090",
     config: {
-      apiKey: "sk-test",
-      baseUrl: "https://api.openai.com/v1/",
-      model: "tts-1",
-      voice: "alloy",
-      speed: 1.1,
+      apiKey: "token-123",
+      baseUrl: "https://unspeech.example/v1",
+      model: "v1",
+      voice: "zh_female_test",
+      appId: "appid-xyz",
     },
   });
 
   assert.ok(request);
-  assert.equal(request?.url, "https://api.openai.com/v1/audio/speech");
-  assert.equal(request?.body.model, "tts-1");
-  assert.equal(request?.body.voice, "alloy");
+  const legacy = buildLegacyTtsHttpRequest(request!);
+  assert.equal(legacy.url, "http://localhost:8090/api/tts/synthesize");
+  assert.deepEqual(legacy.body, {
+    text: "fallback test",
+    engine: "volcengine-speech",
+    providerId: "volcengine-speech",
+    provider_id: "volcengine-speech",
+    config: {
+      apiKey: "token-123",
+      api_key: "token-123",
+      baseUrl: "https://unspeech.example/v1",
+      base_url: "https://unspeech.example/v1",
+      model: "volcengine/v1",
+      voice: "zh_female_test",
+      appId: "appid-xyz",
+      appid: "appid-xyz",
+      app_id: "appid-xyz",
+      backend: "volcengine",
+    },
+  });
+});
+
+run("keeps alibaba model id without provider prefix in legacy fallback request", () => {
+  const request = buildDirectTtsHttpRequest({
+    text: "fallback alibaba",
+    engineId: "alibaba-cloud-model-studio-speech",
+    apiBaseUrl: "http://localhost:8090",
+    config: {
+      apiKey: "token-123",
+      model: "alibaba/cosyvoice-v1",
+      voice: "longxiaochun_v2",
+    },
+  });
+
+  assert.ok(request);
+  const legacy = buildLegacyTtsHttpRequest(request!);
+  assert.equal((legacy.body.config as { model?: string }).model, "cosyvoice-v1");
 });

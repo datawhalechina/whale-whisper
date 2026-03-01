@@ -106,7 +106,7 @@ tts:
     - id: volcengine-speech
       label: Volcengine
       type: openai_compat
-      base_url: https://unspeech.hyp3r.link/v1
+      base_url: https://openspeech.bytedance.com/api/v1/tts
       model: v1
       api_key_env: UNSPEECH_API_KEY
       paths:
@@ -120,8 +120,8 @@ tts:
     - id: alibaba-cloud-model-studio-speech
       label: Alibaba Cloud Model Studio
       type: openai_compat
-      base_url: https://unspeech.hyp3r.link/v1
-      model: alibaba/cosyvoice-v1
+      base_url: https://dashscope.aliyuncs.com
+      model: cosyvoice-v1
       api_key_env: BAILIAN_API_KEY
       paths:
         speech: /audio/speech

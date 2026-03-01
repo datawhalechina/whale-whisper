@@ -1,5 +1,6 @@
 import { appConfig } from "../config";
 import {
+  buildLegacyTtsHttpRequest,
   buildDirectTtsHttpRequest,
   supportsDirectTts,
 } from "../utils/tts-direct-request";
@@ -40,6 +41,59 @@ export type AsrStreamConnection = {
 
 export { buildDirectTtsHttpRequest, supportsDirectTts };
 
+function createTtsHttpError(status: number, detail: string) {
+  const error = new Error(detail || `Direct TTS request failed: ${status}`) as Error & {
+    status?: number;
+    detail?: string;
+  };
+  error.status = status;
+  error.detail = detail || undefined;
+  return error;
+}
+
+function decodeBase64Audio(base64: string, mimeType: string) {
+  const cleaned = base64.trim().replace(/^data:[^;]+;base64,/, "");
+  const binary = atob(cleaned);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: mimeType || "audio/mpeg" });
+}
+
+async function resolveTtsBlob(response: Response) {
+  const contentType = (response.headers.get("Content-Type") || "").toLowerCase();
+  if (!contentType.includes("application/json")) {
+    return await response.blob();
+  }
+
+  const payload = (await response.json().catch(() => null)) as
+    | {
+        audioBase64?: unknown;
+        audio_base64?: unknown;
+        audio?: unknown;
+        mimeType?: unknown;
+        mime_type?: unknown;
+        format?: unknown;
+      }
+    | null;
+  const audioBase64 =
+    (typeof payload?.audioBase64 === "string" && payload.audioBase64) ||
+    (typeof payload?.audio_base64 === "string" && payload.audio_base64) ||
+    (typeof payload?.audio === "string" && payload.audio) ||
+    "";
+  if (audioBase64) {
+    const mimeType =
+      (typeof payload?.mimeType === "string" && payload.mimeType) ||
+      (typeof payload?.mime_type === "string" && payload.mime_type) ||
+      (typeof payload?.format === "string" && `audio/${payload.format}`) ||
+      "audio/mpeg";
+    return decodeBase64Audio(audioBase64, mimeType);
+  }
+
+  throw new Error("TTS response JSON does not contain audio payload.");
+}
+
 export function resolveAudioApiBaseUrl() {
   const proxyUrl = appConfig.providers.proxyUrl?.trim();
   const apiBaseUrl = appConfig.providers.apiBaseUrl?.trim();
@@ -61,13 +115,19 @@ export async function requestTts(request: TtsRequest): Promise<Blob> {
 }
 
 export async function requestTtsDirect(request: TtsRequest): Promise<Blob> {
+  const apiBaseUrl = request.baseUrl?.trim() || resolveAudioApiBaseUrl();
+  if (!apiBaseUrl) {
+    throw new Error("Audio API base URL is not configured.");
+  }
+
   const directRequest = buildDirectTtsHttpRequest({
     text: request.text,
     engineId: request.engineId,
+    apiBaseUrl,
     config: request.config,
   });
   if (!directRequest) {
-    throw new Error("Direct provider TTS request is not available for current config.");
+    throw new Error("Backend relay TTS request is not available for current config.");
   }
 
   const response = await fetch(directRequest.url, {
@@ -77,18 +137,29 @@ export async function requestTtsDirect(request: TtsRequest): Promise<Blob> {
     signal: request.signal,
   });
 
-  if (!response.ok) {
-    const detail = await response.text();
-    const error = new Error(detail || `Direct TTS request failed: ${response.status}`) as Error & {
-      status?: number;
-      detail?: string;
-    };
-    error.status = response.status;
-    error.detail = detail || undefined;
-    throw error;
+  if (response.ok) {
+    return await resolveTtsBlob(response);
   }
 
-  return await response.blob();
+  if (response.status === 405) {
+    const legacyRequest = buildLegacyTtsHttpRequest(directRequest);
+    const legacyResponse = await fetch(legacyRequest.url, {
+      method: "POST",
+      headers: legacyRequest.headers,
+      body: JSON.stringify(legacyRequest.body),
+      signal: request.signal,
+    });
+
+    if (legacyResponse.ok) {
+      return await resolveTtsBlob(legacyResponse);
+    }
+
+    const detail = await legacyResponse.text();
+    throw createTtsHttpError(legacyResponse.status, detail);
+  }
+
+  const detail = await response.text();
+  throw createTtsHttpError(response.status, detail);
 }
 
 export async function requestAsr(request: AsrRequest): Promise<Record<string, any>> {

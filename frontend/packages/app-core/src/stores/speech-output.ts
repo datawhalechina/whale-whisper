@@ -91,8 +91,6 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
     if (typeof metadataEngineId === "string" && metadataEngineId.trim()) {
       return metadataEngineId.trim();
     }
-    if (speechProviderId.value === "openai-audio-speech") return "openai-tts";
-    if (speechProviderId.value === "openai-compatible-audio-speech") return "openai-tts";
     if (speechProviderId.value === "volcengine-speech" || speechProviderId.value === "volcengine") {
       return "volcengine-speech";
     }
@@ -490,16 +488,11 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
     }
     if (providerConfig.value?.baseUrl) {
       config.baseUrl = providerConfig.value.baseUrl;
+      config.base_url = providerConfig.value.baseUrl;
     }
     let model = providerConfig.value?.model;
     const voice = resolvedVoiceId.value;
     if (model) {
-      if (isAlibaba && !model.includes("/")) {
-        model = `alibaba/${model}`;
-      }
-      if (isVolcengine && !model.includes("/")) {
-        model = `volcengine/${model}`;
-      }
       config.model = model;
     }
     if (voice) {
@@ -516,12 +509,9 @@ export const useSpeechOutputStore = defineStore("speech-output", () => {
       config.pitch = pitch.value;
     }
     if (isVolcengine) {
-      config.backend = "volcengine";
       const appId = String(providerConfig.value?.extra?.appId ?? providerConfig.value?.extra?.appid ?? "").trim();
       if (appId) {
         config.appId = appId;
-        config.appid = appId;
-        config.app = { appid: appId, appId };
       }
     }
     return config;

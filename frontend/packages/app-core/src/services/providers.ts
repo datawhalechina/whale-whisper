@@ -1,8 +1,5 @@
 import type { ProviderConfig } from "../stores/providers";
 import type { ProviderCatalogEntry, ProviderCategory, SelectOption } from "../data/provider-catalog";
-import type { UnAlibabaCloudOptions, UnVolcengineOptions, VoiceProviderWithExtraOptions } from "unspeech";
-
-import { createUnAlibabaCloud, createUnVolcengine, listVoices } from "unspeech";
 
 import { appConfig } from "../config";
 
@@ -115,106 +112,45 @@ export async function listProviderModels(option: ProviderCatalogEntry, config: P
 }
 
 export async function listProviderVoices(option: ProviderCatalogEntry, config: ProviderConfig) {
-  if (option.id === "openai-compatible-audio-speech") {
-    return [];
-  }
-
-  if (option.id === "volcengine-speech") {
-    const apiKey = config.apiKey?.trim();
-    const baseUrl = normalizeBaseUrl(config.baseUrl, resolveDefaultBaseUrl(option));
-    if (!apiKey || !baseUrl) {
-      return [];
-    }
-
-    try {
-      const provider = createUnVolcengine(apiKey, baseUrl) as VoiceProviderWithExtraOptions<UnVolcengineOptions>;
-      const voices = await listVoices({
-        ...(provider as any).voice(),
-      });
-      return voices.map((voice) => {
-        const descriptions: string[] = [];
-        if (voice.languages?.length) {
-          descriptions.push(voice.languages.map((lang) => lang.title).join(", "));
-        }
-        return {
-          id: voice.id,
-          label: voice.name,
-          description: descriptions.join(" | "),
-        };
-      });
-    } catch {
-      // Fall through to proxy fetch as a fallback.
-    }
-  }
+  const payload = {
+    providerId: option.id,
+    apiKey: config.apiKey ?? "",
+    baseUrl: normalizeBaseUrl(config.baseUrl, resolveDefaultBaseUrl(option)),
+    model: config.model ?? "",
+    extra: config.extra ?? {},
+  };
 
   if (!proxyBaseUrl) {
-    if (option.id === "alibaba-cloud-model-studio-speech") {
-      const apiKey = config.apiKey?.trim();
-      const baseUrl = normalizeBaseUrl(config.baseUrl, resolveDefaultBaseUrl(option));
-      if (!apiKey || !baseUrl) {
-        return [];
-      }
-      const configuredModel = config.model?.trim();
-      const modelCandidates = new Set<string>();
-      if (configuredModel) {
-        modelCandidates.add(configuredModel);
-        if (configuredModel.includes("/")) {
-          const shortModel = configuredModel.split("/").pop();
-          if (shortModel) {
-            modelCandidates.add(shortModel);
-          }
-        } else {
-          modelCandidates.add(`alibaba/${configuredModel}`);
-        }
-      }
-
-      const voiceQueryModel =
-        configuredModel && !configuredModel.includes("/")
-          ? `alibaba/${configuredModel}`
-          : configuredModel;
-      const provider = createUnAlibabaCloud(apiKey, baseUrl) as VoiceProviderWithExtraOptions<UnAlibabaCloudOptions>;
-      const voices = await listVoices({
-        ...(provider as any).voice(
-          voiceQueryModel ? ({ model: voiceQueryModel } as Record<string, unknown>) : undefined
-        ),
-      });
-      const filtered = voices.filter((voice) => {
-        const compatible = voice.compatible_models;
-        if (!Array.isArray(compatible) || compatible.length === 0) {
-          return true;
-        }
-        if (!modelCandidates.size) {
-          return true;
-        }
-        return compatible.some((model) => modelCandidates.has(model));
-      });
-      const resolved = modelCandidates.size ? filtered : voices;
-      return resolved.map((voice) => {
-        const descriptions: string[] = [];
-        if (voice.languages?.length) {
-          descriptions.push(voice.languages.map((lang) => lang.title).join(", "));
-        }
-        if (Array.isArray(voice.compatible_models) && voice.compatible_models.length) {
-          descriptions.push(`Models: ${voice.compatible_models.join(", ")}`);
-        }
-        return {
-          id: voice.id,
-          label: voice.name,
-          description: descriptions.join(" · "),
-        };
-      });
+    const baseUrl = resolveApiBaseUrl();
+    if (!baseUrl) {
+      return null;
     }
-    return null;
+
+    const response = await fetch(`${baseUrl}/api/providers/voices`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Provider voices request failed: ${response.status}`);
+    }
+
+    const result = (await response.json()) as {
+      voices?: SelectOption[];
+      data?: { voices?: SelectOption[] };
+    };
+
+    if (result.data?.voices) return result.data.voices;
+    if (result.voices) return result.voices;
+    return [];
   }
 
   const result = await requestProxy<{ voices?: SelectOption[]; data?: { voices?: SelectOption[] } }>(
     "/providers/voices",
-    {
-      providerId: option.id,
-      apiKey: config.apiKey ?? "",
-      baseUrl: normalizeBaseUrl(config.baseUrl, resolveDefaultBaseUrl(option)),
-      extra: config.extra ?? {},
-    }
+    payload
   );
 
   if (result.data?.voices) return result.data.voices;

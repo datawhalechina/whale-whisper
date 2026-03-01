@@ -244,47 +244,6 @@ export const fallbackProviderCatalog: ProviderCatalogEntry[] = [
     ]
   },
   {
-    "id": "openai-audio-speech",
-    "label": "OpenAI",
-    "category": "speech",
-    "icon": "i-lobe-icons:openai",
-    "description": "OpenAI speech models.",
-    "engineId": "openai-tts",
-    "defaults": {
-      "baseUrl": "https://api.openai.com/v1/",
-      "model": "tts-1",
-      "voice": "alloy"
-    },
-    "fields": [
-      {
-        "id": "apiKey",
-        "label": "API Key",
-        "type": "secret",
-        "required": true,
-        "placeholder": "sk-..."
-      },
-      {
-        "id": "baseUrl",
-        "label": "Base URL",
-        "type": "text",
-        "required": true,
-        "default": "https://api.openai.com/v1/"
-      },
-      {
-        "id": "model",
-        "label": "Model",
-        "type": "select",
-        "optionsSource": "models"
-      },
-      {
-        "id": "voice",
-        "label": "Voice",
-        "type": "select",
-        "optionsSource": "voices"
-      }
-    ]
-  },
-  {
     "id": "openai-audio-transcription",
     "label": "OpenAI",
     "category": "transcription",
@@ -823,38 +782,6 @@ export const fallbackProviderCatalog: ProviderCatalogEntry[] = [
     ]
   },
   {
-    "id": "openai-compatible-audio-speech",
-    "label": "OpenAI Compatible",
-    "category": "speech",
-    "icon": "i-lobe-icons:openai",
-    "description": "OpenAI-compatible speech.",
-    "fields": [
-      {
-        "id": "apiKey",
-        "label": "API Key",
-        "type": "secret",
-        "required": true
-      },
-      {
-        "id": "baseUrl",
-        "label": "Base URL",
-        "type": "text",
-        "required": true
-      },
-      {
-        "id": "model",
-        "label": "Model",
-        "type": "select",
-        "optionsSource": "models"
-      },
-      {
-        "id": "voice",
-        "label": "Voice",
-        "type": "text"
-      }
-    ]
-  },
-  {
     "id": "volcengine-speech",
     "label": "Volcengine",
     "category": "speech",
@@ -862,7 +789,7 @@ export const fallbackProviderCatalog: ProviderCatalogEntry[] = [
     "description": "volcengine.com",
     "engineId": "volcengine-speech",
     "defaults": {
-      "baseUrl": "https://unspeech.hyp3r.link/v1/",
+      "baseUrl": "https://openspeech.bytedance.com/api/v1/tts",
       "model": "v1"
     },
     "fields": [
@@ -878,7 +805,7 @@ export const fallbackProviderCatalog: ProviderCatalogEntry[] = [
         "label": "Base URL",
         "type": "text",
         "required": true,
-        "default": "https://unspeech.hyp3r.link/v1/"
+        "default": "https://openspeech.bytedance.com/api/v1/tts"
       },
       {
         "id": "model",
@@ -914,8 +841,8 @@ export const fallbackProviderCatalog: ProviderCatalogEntry[] = [
     "description": "bailian.console.aliyun.com",
     "engineId": "alibaba-cloud-model-studio-speech",
     "defaults": {
-      "baseUrl": "https://unspeech.hyp3r.link/v1/",
-      "model": "alibaba/cosyvoice-v1"
+      "baseUrl": "https://dashscope.aliyuncs.com",
+      "model": "cosyvoice-v1"
     },
     "fields": [
       {
@@ -929,7 +856,7 @@ export const fallbackProviderCatalog: ProviderCatalogEntry[] = [
         "label": "Base URL",
         "type": "text",
         "required": true,
-        "default": "https://unspeech.hyp3r.link/v1/"
+        "default": "https://dashscope.aliyuncs.com"
       },
       {
         "id": "model",
@@ -937,11 +864,11 @@ export const fallbackProviderCatalog: ProviderCatalogEntry[] = [
         "type": "select",
         "options": [
           {
-            "id": "alibaba/cosyvoice-v1",
+            "id": "cosyvoice-v1",
             "label": "cosyvoice-v1"
           },
           {
-            "id": "alibaba/cosyvoice-v2",
+            "id": "cosyvoice-v2",
             "label": "cosyvoice-v2"
           }
         ]
@@ -951,143 +878,6 @@ export const fallbackProviderCatalog: ProviderCatalogEntry[] = [
         "label": "Voice",
         "type": "select",
         "optionsSource": "voices"
-      }
-    ]
-  },
-  {
-    "id": "elevenlabs",
-    "label": "ElevenLabs",
-    "category": "speech",
-    "icon": "i-simple-icons:elevenlabs",
-    "description": "Voice synthesis & cloning.",
-    "defaults": {
-      "baseUrl": "https://unspeech.hyp3r.link/v1/"
-    },
-    "fields": [
-      {
-        "id": "apiKey",
-        "label": "API Key",
-        "type": "secret",
-        "required": true
-      },
-      {
-        "id": "baseUrl",
-        "label": "Base URL",
-        "type": "text",
-        "required": true,
-        "default": "https://unspeech.hyp3r.link/v1/"
-      },
-      {
-        "id": "voice",
-        "label": "Voice",
-        "type": "text"
-      }
-    ]
-  },
-  {
-    "id": "microsoft-speech",
-    "label": "Microsoft / Azure Speech",
-    "category": "speech",
-    "icon": "i-lobe-icons:microsoft",
-    "description": "Microsoft speech services.",
-    "defaults": {
-      "baseUrl": "https://unspeech.hyp3r.link/v1/"
-    },
-    "fields": [
-      {
-        "id": "apiKey",
-        "label": "API Key",
-        "type": "secret",
-        "required": true
-      },
-      {
-        "id": "baseUrl",
-        "label": "Base URL",
-        "type": "text",
-        "default": "https://unspeech.hyp3r.link/v1/"
-      },
-      {
-        "id": "voice",
-        "label": "Voice",
-        "type": "text"
-      }
-    ]
-  },
-  {
-    "id": "index-tts-vllm",
-    "label": "Bilibili Index TTS",
-    "category": "speech",
-    "icon": "i-lobe-icons:bilibiliindex",
-    "description": "index-tts.github.io",
-    "defaults": {
-      "baseUrl": "http://localhost:8000/v1/"
-    },
-    "fields": [
-      {
-        "id": "baseUrl",
-        "label": "Base URL",
-        "type": "text",
-        "required": true,
-        "default": "http://localhost:8000/v1/"
-      },
-      {
-        "id": "model",
-        "label": "Model",
-        "type": "select",
-        "optionsSource": "models"
-      }
-    ]
-  },
-  {
-    "id": "comet-api-speech",
-    "label": "Comet API",
-    "category": "speech",
-    "icon": "i-lobe-icons:cometapi",
-    "description": "Comet API speech.",
-    "defaults": {
-      "baseUrl": "https://api.cometapi.com/v1/"
-    },
-    "fields": [
-      {
-        "id": "apiKey",
-        "label": "API Key",
-        "type": "secret",
-        "required": true
-      },
-      {
-        "id": "baseUrl",
-        "label": "Base URL",
-        "type": "text",
-        "default": "https://api.cometapi.com/v1/"
-      },
-      {
-        "id": "voice",
-        "label": "Voice",
-        "type": "text"
-      }
-    ]
-  },
-  {
-    "id": "player2-speech",
-    "label": "Player2 Speech",
-    "category": "speech",
-    "icon": "i-lobe-icons:player2",
-    "description": "Local gameplay assistant speech.",
-    "defaults": {
-      "baseUrl": "http://localhost:4315/v1/"
-    },
-    "fields": [
-      {
-        "id": "baseUrl",
-        "label": "Base URL",
-        "type": "text",
-        "required": true,
-        "default": "http://localhost:4315/v1/"
-      },
-      {
-        "id": "voice",
-        "label": "Voice",
-        "type": "text"
       }
     ]
   },

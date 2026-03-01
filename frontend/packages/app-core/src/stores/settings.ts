@@ -15,7 +15,7 @@ export const useSettingsStore = defineStore("settings", () => {
   } = storeToRefs(stageSettings);
   const themeColorsHueDynamic = ref(false);
   const chatProviderId = useLocalStorage("whalewhisper/providers/chat", "openrouter-ai");
-  const speechProviderId = useLocalStorage("whalewhisper/providers/speech", "openai-audio-speech");
+  const speechProviderId = useLocalStorage("whalewhisper/providers/speech", "browser-local-audio-speech");
   const transcriptionProviderId = useLocalStorage(
     "whalewhisper/providers/transcription",
     "openai-audio-transcription"

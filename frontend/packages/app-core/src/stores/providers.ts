@@ -19,6 +19,7 @@ import {
 import { useI18n } from "../composables/use-i18n";
 import { formatHealthError, formatHealthMessage } from "../utils/health";
 import { filterProviderFields } from "../utils/provider-fields";
+import { isVisibleSpeechProviderId } from "../utils/provider-visibility";
 import { useSettingsStore } from "./settings";
 
 export type ProviderStatus = "online" | "offline";
@@ -80,9 +81,24 @@ export const useProvidersStore = defineStore("providers", () => {
     };
   }
 
+  function filterRemovedSpeechProviders(providers: ProviderCatalogEntry[]) {
+    return providers.filter((provider) => {
+      if (provider.category !== "speech") return true;
+      return isVisibleSpeechProviderId(provider.id);
+    });
+  }
+
   const effectiveProviders = computed(() => {
-    if (catalogProviders.value.length) return catalogProviders.value.map((option) => normalizeProviderEntry(option));
-    if (catalogError.value) return fallbackProviderCatalog.map((option) => normalizeProviderEntry(option));
+    if (catalogProviders.value.length) {
+      return filterRemovedSpeechProviders(
+        catalogProviders.value.map((option) => normalizeProviderEntry(option))
+      );
+    }
+    if (catalogError.value) {
+      return filterRemovedSpeechProviders(
+        fallbackProviderCatalog.map((option) => normalizeProviderEntry(option))
+      );
+    }
     return [];
   });
 
