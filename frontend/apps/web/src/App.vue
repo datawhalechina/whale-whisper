@@ -55,6 +55,7 @@ useActionTokenPromptSync();
 const chatStore = useChatStore();
 const live2dRuntime = useLive2dRuntime();
 const speechOutput = useSpeechOutputStore();
+let disposeTokenLiteral: (() => void) | null = null;
 let disposeSpecialToken: (() => void) | null = null;
 let disposeSpeechOutput: (() => void) | null = null;
 
@@ -73,15 +74,20 @@ onMounted(() => {
     uiStore.openSessions();
   }
   chatStore.connect();
+  disposeTokenLiteral = chatStore.onTokenLiteral(async (literal) => {
+    speechOutput.pushAssistantLiteral(literal);
+  });
   disposeSpecialToken = chatStore.onTokenSpecial(async (special) => {
     await live2dRuntime.applySpecialToken(special);
+    speechOutput.pushAssistantSpecial(special);
   });
   disposeSpeechOutput = chatStore.onAssistantFinal(async (message) => {
-    speechOutput.speak(message.content);
+    await speechOutput.endAssistantStream(message.content);
   });
 });
 
 onUnmounted(() => {
+  disposeTokenLiteral?.();
   disposeSpecialToken?.();
   disposeSpeechOutput?.();
 });

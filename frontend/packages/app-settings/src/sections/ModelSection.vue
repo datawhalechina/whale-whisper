@@ -122,11 +122,17 @@ function buildPanel(category: "chat" | "speech" | "transcription", providerId: s
           : category === "speech"
             ? speechProviderId.value
             : transcriptionProviderId.value;
-      const targetField = providersStore
-        .getProviderFields(updatedProviderId)
-        .find((field) => field.id === fieldId);
+      const providerFields = providersStore.getProviderFields(updatedProviderId);
+      const targetField = providerFields.find((field) => field.id === fieldId);
       if (!targetField) return;
       providersStore.setProviderFieldValue(updatedProviderId, targetField, value);
+      if (category === "speech" && fieldId === "model") {
+        const voiceField = providerFields.find((field) => field.id === "voice");
+        if (voiceField) {
+          providersStore.setProviderFieldValue(updatedProviderId, voiceField, "");
+        }
+        void providersStore.refreshProvider(updatedProviderId);
+      }
     },
   };
 }

@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
 import SelectMenu from "./ui/SelectMenu.vue";
@@ -29,26 +29,27 @@ type TranscriptionState = {
   vadMinSpeechMs?: number;
   vadSilenceMs?: number;
   listening?: boolean;
+  listeningSource?: string | null;
   canListen?: boolean;
   supported?: boolean;
   interimText?: string;
   lastTranscript?: string;
   error?: string | null;
-  startListening?: () => void;
-  stopListening?: () => void;
+  startListening?: (options?: {
+    autoSend?: boolean;
+    source?: string;
+  }) => void | Promise<void>;
+  stopListening?: () => void | Promise<void>;
 };
 
 type SpeechOutputState = {
   enabled?: boolean;
-  voiceId?: string;
   rate?: number;
   pitch?: number;
   volume?: number;
   streaming?: boolean;
-  voices?: Array<{ voiceURI: string; name: string; lang?: string }>;
   supported?: boolean;
   lastError?: string | null;
-  refreshVoices?: () => void;
   speak?: (text: string) => void | Promise<void>;
   stop?: () => void;
 };
@@ -185,22 +186,8 @@ const speechThreshold = computed({
   },
 });
 
-const sttEnabled = computed({
-  get: () => !!props.transcription?.enabled,
-  set: (value: boolean) => {
-    if (!props.transcription) return;
-    props.transcription.enabled = value;
-  },
-});
-const autoSend = computed({
-  get: () => !!props.transcription?.autoSend,
-  set: (value: boolean) => {
-    if (!props.transcription) return;
-    props.transcription.autoSend = value;
-  },
-});
-const language = computed({
-  get: () => props.transcription?.language ?? "en-US",
+const transcriptionLanguage = computed({
+  get: () => props.transcription?.language ?? (isZh.value ? "zh-CN" : "en-US"),
   set: (value: string) => {
     if (!props.transcription) return;
     props.transcription.language = value;
@@ -226,13 +213,6 @@ const ttsEnabled = computed({
   set: (value: boolean) => {
     if (!props.speechOutput) return;
     props.speechOutput.enabled = value;
-  },
-});
-const voiceId = computed({
-  get: () => props.speechOutput?.voiceId ?? "",
-  set: (value: string) => {
-    if (!props.speechOutput) return;
-    props.speechOutput.voiceId = value;
   },
 });
 const rate = computed({
@@ -277,15 +257,35 @@ const deviceOptions = computed<SelectOption[]>(() => {
   }));
 });
 
-const voiceOptions = computed<SelectOption[]>(() =>
-  (props.speechOutput?.voices ?? []).map((voice) => ({
-    id: voice.voiceURI,
-    label: voice.name,
-    description: voice.lang,
-  }))
-);
+const transcriptionLanguageOptions = computed<SelectOption[]>(() => [
+  {
+    id: "zh-CN",
+    label: isZh.value ? "中文（简体）" : "Chinese (Simplified)",
+    description: "zh-CN",
+  },
+  {
+    id: "en-US",
+    label: "English (US)",
+    description: "en-US",
+  },
+  {
+    id: "ja-JP",
+    label: "Japanese",
+    description: "ja-JP",
+  },
+  {
+    id: "ko-KR",
+    label: "Korean",
+    description: "ko-KR",
+  },
+]);
 
 const testText = ref("");
+const transcriptionTestOnlyHint = computed(() =>
+  isZh.value
+    ? "麦克风仅用于测试识别，不会发送到聊天。"
+    : "Microphone here is test-only and will not send to chat."
+);
 const defaultTestText = computed(() =>
   isZh.value ? "你好，这是一段语音测试。" : "Hello! This is a voice test."
 );
@@ -325,18 +325,41 @@ function formatDeviceLabel(device: { deviceId: string; label?: string }) {
   return cleaned || t("audio.device.unknown");
 }
 
-function toggleListening() {
-  if (!props.transcription) return;
-  if (props.transcription.listening) {
-    props.transcription.stopListening?.();
-  } else {
-    props.transcription.startListening?.();
+const settingsMicActive = computed(
+  () =>
+    !!props.transcription?.listening &&
+    props.transcription?.listeningSource === "settings-test"
+);
+const micActive = computed(() => {
+  if (props.transcription) {
+    return settingsMicActive.value;
   }
+  return micEnabled.value;
+});
+
+async function toggleMicInput() {
+  if (props.transcription?.canListen) {
+    const canStopCurrentSession =
+      !!props.transcription.listening &&
+      (props.transcription.listeningSource === "settings-test" ||
+        props.transcription.listeningSource == null);
+    if (canStopCurrentSession) {
+      await props.transcription.stopListening?.();
+      return;
+    }
+    props.transcription.enabled = true;
+    await props.transcription.startListening?.({
+      autoSend: false,
+      source: "settings-test",
+    });
+    return;
+  }
+
+  micEnabled.value = !micEnabled.value;
 }
 
 onMounted(() => {
   void props.hearing?.refreshDevices?.();
-  props.speechOutput?.refreshVoices?.();
   if (!testText.value) {
     testText.value = defaultTestText.value;
   }
@@ -353,23 +376,23 @@ onMounted(() => {
         <div class="relative h-24 w-24">
           <div
             class="absolute left-1/2 top-1/2 h-16 w-16 rounded-full transition-all duration-150 -translate-x-1/2 -translate-y-1/2"
-            :class="micEnabled ? 'bg-primary-500/20' : 'bg-neutral-300/20 dark:bg-neutral-700/30'"
+            :class="micActive ? 'bg-primary-500/20' : 'bg-neutral-300/20 dark:bg-neutral-700/30'"
             :style="{ transform: `translate(-50%, -50%) scale(${1 + ((props.hearing?.volumeLevel ?? 0) / 100) * 0.35})` }"
           />
           <div
             class="absolute left-1/2 top-1/2 h-20 w-20 rounded-full transition-all duration-200 -translate-x-1/2 -translate-y-1/2"
-            :class="micEnabled ? 'bg-primary-500/10' : 'bg-neutral-300/10 dark:bg-neutral-700/20'"
+            :class="micActive ? 'bg-primary-500/10' : 'bg-neutral-300/10 dark:bg-neutral-700/20'"
             :style="{ transform: `translate(-50%, -50%) scale(${1.2 + ((props.hearing?.volumeLevel ?? 0) / 100) * 0.5})` }"
           />
           <button
             type="button"
             class="absolute left-1/2 top-1/2 grid h-14 w-14 place-items-center rounded-full shadow-md transition-all duration-200 -translate-x-1/2 -translate-y-1/2"
-            :class="micEnabled
+            :class="micActive
               ? 'bg-primary-500 text-white hover:bg-primary-600 active:scale-95'
               : 'bg-neutral-200 text-neutral-600 hover:bg-neutral-300 active:scale-95 dark:bg-neutral-700 dark:text-neutral-200'"
-            @click="micEnabled = !micEnabled"
+            @click="toggleMicInput"
           >
-            <div :class="micEnabled ? 'i-solar:microphone-bold' : 'i-solar:microphone-3-bold-duotone'" class="h-6 w-6" />
+            <div :class="micActive ? 'i-solar:microphone-bold' : 'i-solar:microphone-3-bold-duotone'" class="h-6 w-6" />
           </button>
         </div>
 
@@ -422,42 +445,19 @@ onMounted(() => {
       </div>
 
       <div class="mt-4 grid gap-2">
-        <div class="flex items-center justify-between rounded-xl border border-neutral-200/70 bg-white/60 px-3 py-2 dark:border-neutral-800/70 dark:bg-neutral-900/60">
-          <div>
-            <div class="text-sm font-medium text-neutral-800 dark:text-neutral-100">
-              {{ t("audio.stt.title") }}
-            </div>
-            <div class="text-xs text-neutral-500 dark:text-neutral-400">
-              {{ t("audio.stt.desc") }}
-            </div>
-          </div>
-          <button
-            type="button"
-            class="rounded-lg border border-neutral-200 bg-white/80 px-3 py-1 text-xs text-neutral-600 transition hover:text-neutral-900 dark:border-neutral-700 dark:bg-neutral-800/80 dark:text-neutral-300"
-            @click="sttEnabled = !sttEnabled"
-          >
-            {{ sttEnabled ? t("common.disabled") : t("common.enabled") }}
-          </button>
-        </div>
+        <label class="text-xs text-neutral-500 dark:text-neutral-400">
+          {{ t("audio.stt.language") }}
+        </label>
+        <SelectMenu
+          v-model="transcriptionLanguage"
+          :options="transcriptionLanguageOptions"
+          :placeholder="t('audio.stt.language')"
+        />
+      </div>
+
+      <div class="mt-4 grid gap-2">
         <div class="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            class="rounded-lg border border-neutral-200 bg-white/80 px-3 py-1 text-xs text-neutral-600 transition hover:text-neutral-900 disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-800/80 dark:text-neutral-300"
-            :disabled="!props.transcription?.canListen"
-            @click="toggleListening"
-          >
-            {{ props.transcription?.listening ? t("audio.stt.stop") : t("audio.stt.start") }}
-          </button>
-          <label class="text-xs text-neutral-500 dark:text-neutral-400">
-            {{ t("audio.stt.language") }}
-          </label>
-          <input
-            v-model="language"
-            type="text"
-            placeholder="en-US"
-            class="w-28 rounded-lg border border-neutral-200 bg-white/80 px-2 py-1 text-xs text-neutral-700 shadow-sm outline-none transition focus:border-primary-400 dark:border-neutral-800 dark:bg-neutral-900/70 dark:text-neutral-200"
-          />
-          <label class="ml-2 flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+          <label class="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
             {{ t("audio.stt.vad.minSpeech") }}
             <input
               v-model.number="vadMinSpeechMs"
@@ -468,7 +468,7 @@ onMounted(() => {
               class="w-20 rounded-lg border border-neutral-200 bg-white/80 px-2 py-1 text-xs text-neutral-700 shadow-sm outline-none transition focus:border-primary-400 dark:border-neutral-800 dark:bg-neutral-900/70 dark:text-neutral-200"
             />
           </label>
-          <label class="ml-2 flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+          <label class="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
             {{ t("audio.stt.vad.silence") }}
             <input
               v-model.number="vadSilenceMs"
@@ -479,19 +479,20 @@ onMounted(() => {
               class="w-20 rounded-lg border border-neutral-200 bg-white/80 px-2 py-1 text-xs text-neutral-700 shadow-sm outline-none transition focus:border-primary-400 dark:border-neutral-800 dark:bg-neutral-900/70 dark:text-neutral-200"
             />
           </label>
-          <label class="ml-2 flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
-            <input v-model="autoSend" type="checkbox" class="accent-primary-500" />
-            {{ t("audio.stt.autosend") }}
-          </label>
+        </div>
+        <div class="text-xs text-neutral-500 dark:text-neutral-400">
+          {{ transcriptionTestOnlyHint }}
+        </div>
+        <div class="text-xs text-neutral-500 dark:text-neutral-400">
+          {{ t("audio.stt.last") }}
+        </div>
+        <div class="rounded-xl border border-neutral-200/70 bg-white/60 px-3 py-2 text-xs text-neutral-700 dark:border-neutral-800/70 dark:bg-neutral-900/60 dark:text-neutral-300">
+          <span v-if="props.transcription?.interimText">{{ props.transcription.interimText }}</span>
+          <span v-else-if="props.transcription?.lastTranscript">{{ props.transcription.lastTranscript }}</span>
+          <span v-else class="text-neutral-400 dark:text-neutral-500">-</span>
         </div>
         <div v-if="props.transcription?.error" class="text-xs text-rose-500">
           {{ props.transcription.error }}
-        </div>
-        <div v-if="props.transcription?.interimText" class="text-xs text-neutral-500 dark:text-neutral-400">
-          {{ t("audio.stt.listening") }} {{ props.transcription.interimText }}
-        </div>
-        <div v-else-if="props.transcription?.lastTranscript" class="text-xs text-neutral-500 dark:text-neutral-400">
-          {{ t("audio.stt.last") }} {{ props.transcription.lastTranscript }}
         </div>
       </div>
     </div>
@@ -518,14 +519,6 @@ onMounted(() => {
         </button>
       </div>
       <div class="mt-3 grid gap-2">
-        <label class="text-xs text-neutral-500 dark:text-neutral-400">
-          {{ t("audio.tts.voice") }}
-        </label>
-        <SelectMenu
-          v-model="voiceId"
-          :options="voiceOptions"
-          :placeholder="t('audio.tts.placeholder')"
-        />
         <div v-if="props.speechOutput?.supported === false" class="text-xs text-rose-500">
           {{ t("audio.tts.unsupported") }}
         </div>
@@ -590,3 +583,4 @@ onMounted(() => {
     </div>
   </div>
 </template>
+

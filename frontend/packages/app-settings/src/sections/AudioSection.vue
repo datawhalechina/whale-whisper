@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onUnmounted } from "vue";
 
 import { AudioSection } from "@whalewhisper/stage-settings-ui";
 import { useI18n } from "@whalewhisper/app-core/composables/use-i18n";
@@ -12,6 +12,11 @@ const transcriptionStore = useTranscriptionStore();
 const speechOutputStore = useSpeechOutputStore();
 const { t, locale } = useI18n();
 const localeValue = computed(() => locale.value || "en");
+
+onUnmounted(() => {
+  if (transcriptionStore.listeningSource !== "settings-test") return;
+  void transcriptionStore.stopListening();
+});
 </script>
 
 <template>

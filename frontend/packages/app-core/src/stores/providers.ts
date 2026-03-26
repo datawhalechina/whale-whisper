@@ -18,6 +18,8 @@ import {
 } from "../services/providers";
 import { useI18n } from "../composables/use-i18n";
 import { formatHealthError, formatHealthMessage } from "../utils/health";
+import { filterProviderFields } from "../utils/provider-fields";
+import { isVisibleSpeechProviderId } from "../utils/provider-visibility";
 import { useSettingsStore } from "./settings";
 
 export type ProviderStatus = "online" | "offline";
@@ -40,6 +42,16 @@ export type ProviderRuntime = {
 
 const configFieldIds = new Set(["apiKey", "baseUrl", "model", "voice"]);
 const credentialFieldIds = new Set(["apiKey", "baseUrl"]);
+const ALIYUN_NLS_PROVIDER_ID = "aliyun-nls-transcription";
+const aliyunNlsNormalizedFields: ProviderField[] = [
+  {
+    id: "apiKey",
+    label: "API Key",
+    type: "secret",
+    required: true,
+    scope: "config",
+  },
+];
 
 export const useProvidersStore = defineStore("providers", () => {
   const settingsStore = useSettingsStore();
@@ -47,16 +59,46 @@ export const useProvidersStore = defineStore("providers", () => {
     "whalewhisper/providers/configs",
     {}
   );
-  const engineHealthSkipProviders = new Set(["alibaba-cloud-model-studio-speech"]);
+  const engineHealthSkipProviders = new Set([
+    "alibaba-cloud-model-studio-speech",
+    "volcengine-speech",
+    "aliyun-nls-transcription",
+  ]);
   const providerRuntime = ref<Record<string, ProviderRuntime>>({});
   const catalogProviders = ref<ProviderCatalogEntry[]>([]);
   const catalogLoading = ref(false);
   const catalogError = ref<string | null>(null);
   const { t } = useI18n();
 
+  function normalizeProviderEntry(option: ProviderCatalogEntry): ProviderCatalogEntry {
+    if (option.id !== ALIYUN_NLS_PROVIDER_ID) {
+      return option;
+    }
+
+    return {
+      ...option,
+      fields: aliyunNlsNormalizedFields.map((field) => ({ ...field })),
+    };
+  }
+
+  function filterRemovedSpeechProviders(providers: ProviderCatalogEntry[]) {
+    return providers.filter((provider) => {
+      if (provider.category !== "speech") return true;
+      return isVisibleSpeechProviderId(provider.id);
+    });
+  }
+
   const effectiveProviders = computed(() => {
-    if (catalogProviders.value.length) return catalogProviders.value;
-    if (catalogError.value) return fallbackProviderCatalog;
+    if (catalogProviders.value.length) {
+      return filterRemovedSpeechProviders(
+        catalogProviders.value.map((option) => normalizeProviderEntry(option))
+      );
+    }
+    if (catalogError.value) {
+      return filterRemovedSpeechProviders(
+        fallbackProviderCatalog.map((option) => normalizeProviderEntry(option))
+      );
+    }
     return [];
   });
 
@@ -235,7 +277,7 @@ export const useProvidersStore = defineStore("providers", () => {
 
   function getProviderFields(providerId: string) {
     const option = getProviderMetadata(providerId);
-    return option?.fields ?? [];
+    return filterProviderFields(option);
   }
 
   function getProviderFieldValue(providerId: string, field: ProviderField) {
@@ -536,12 +578,28 @@ export const useProvidersStore = defineStore("providers", () => {
   }
 
   const pendingRefreshIds = new Set<string>();
+  function queueProviderRefresh(providerId: string) {
+    if (!providerId) return;
+    ensureProvider(providerId);
+    ensureDefaultConfig(providerId);
+    pendingRefreshIds.add(providerId);
+  }
+
   const flushRefreshQueue = useDebounceFn(() => {
     pendingRefreshIds.forEach((providerId) => {
       void refreshProvider(providerId);
     });
     pendingRefreshIds.clear();
   }, 600);
+
+  watch(
+    () => [settingsStore.chatProviderId, settingsStore.speechProviderId, settingsStore.transcriptionProviderId],
+    (providerIds) => {
+      providerIds.forEach((providerId) => queueProviderRefresh(providerId));
+      flushRefreshQueue();
+    },
+    { immediate: true }
+  );
 
   watch(
     providerConfigs,
@@ -553,7 +611,7 @@ export const useProvidersStore = defineStore("providers", () => {
         const nextConfig = next?.[key];
         const prevConfig = prev?.[key];
         if (JSON.stringify(nextConfig) !== JSON.stringify(prevConfig)) {
-          pendingRefreshIds.add(key);
+          queueProviderRefresh(key);
         }
       });
       flushRefreshQueue();

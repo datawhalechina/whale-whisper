@@ -205,7 +205,7 @@ providers:
     description: volcengine.com
     engine_id: volcengine-speech
     defaults:
-      base_url: https://unspeech.hyp3r.link/v1/
+      base_url: https://openspeech.bytedance.com/api/v1/tts
       model: v1
     fields:
       - id: apiKey
@@ -216,7 +216,7 @@ providers:
         label: Base URL
         type: text
         required: true
-        default: https://unspeech.hyp3r.link/v1/
+        default: https://openspeech.bytedance.com/api/v1/tts
       - id: model
         label: Model
         type: select
@@ -239,8 +239,8 @@ providers:
     description: bailian.console.aliyun.com
     engine_id: alibaba-cloud-model-studio-speech
     defaults:
-      base_url: https://unspeech.hyp3r.link/v1/
-      model: alibaba/cosyvoice-v1
+      base_url: https://dashscope.aliyuncs.com
+      model: cosyvoice-v1
     fields:
       - id: apiKey
         label: API Key
@@ -250,14 +250,14 @@ providers:
         label: Base URL
         type: text
         required: true
-        default: https://unspeech.hyp3r.link/v1/
+        default: https://dashscope.aliyuncs.com
       - id: model
         label: Model
         type: select
         options:
-          - id: alibaba/cosyvoice-v1
+          - id: cosyvoice-v1
             label: cosyvoice-v1
-          - id: alibaba/cosyvoice-v2
+          - id: cosyvoice-v2
             label: cosyvoice-v2
       - id: voice
         label: Voice
@@ -639,8 +639,7 @@ providers:
         options_source: models
       - id: voice
         label: Voice
-        type: select
-        options_source: voices
+        type: text
   - id: elevenlabs
     label: ElevenLabs
     category: speech
@@ -763,22 +762,16 @@ providers:
         type: select
         options_source: models
   - id: aliyun-nls-transcription
-    label: Aliyun NLS
+    label: Alibaba Cloud Model Studio
     category: transcription
     icon: i-lobe-icons:alibabacloud
-    description: Aliyun transcription.
+    description: Alibaba Bailian ASR transcription.
+    engine_id: aliyun-nls-asr
     fields:
       - id: apiKey
         label: API Key
         type: secret
         required: true
-      - id: baseUrl
-        label: Base URL
-        type: text
-      - id: model
-        label: Model
-        type: select
-        options_source: models
   - id: comet-api-transcription
     label: Comet API
     category: transcription

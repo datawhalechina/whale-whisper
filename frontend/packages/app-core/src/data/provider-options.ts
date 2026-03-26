@@ -35,20 +35,6 @@ export type ProviderOption = {
   defaultExtra?: Record<string, string>;
 };
 
-const openAiVoices: SelectOption[] = [
-  { id: "alloy", label: "Alloy" },
-  { id: "echo", label: "Echo" },
-  { id: "fable", label: "Fable" },
-  { id: "onyx", label: "Onyx" },
-  { id: "nova", label: "Nova" },
-  { id: "shimmer", label: "Shimmer" },
-];
-
-const openAiTtsModels: SelectOption[] = [
-  { id: "tts-1", label: "tts-1" },
-  { id: "tts-1-hd", label: "tts-1-hd" },
-];
-
 const whisperModels: SelectOption[] = [
   { id: "whisper-1", label: "whisper-1" },
 ];
@@ -290,32 +276,6 @@ export const chatProviderOptions: ProviderOption[] = [
 
 export const speechProviderOptions: ProviderOption[] = [
   {
-    id: "openai-audio-speech",
-    label: "OpenAI",
-    icon: "i-lobe-icons:openai",
-    description: "OpenAI speech models.",
-    category: "speech",
-    engineId: "openai-tts",
-    defaultBaseUrl: "https://api.openai.com/v1/",
-    requiresApiKey: true,
-    requiresBaseUrl: true,
-    supportsModels: true,
-    supportsVoices: true,
-    modelOptions: openAiTtsModels,
-    voiceOptions: openAiVoices,
-    defaultModel: "tts-1",
-    defaultVoice: "alloy",
-  },
-  {
-    id: "openai-compatible-audio-speech",
-    label: "OpenAI Compatible",
-    icon: "i-lobe-icons:openai",
-    description: "OpenAI-compatible speech.",
-    category: "speech",
-    requiresApiKey: true,
-    requiresBaseUrl: true,
-  },
-  {
     id: "volcengine-speech",
     label: "Volcengine",
     icon: "i-lobe-icons:volcengine",
@@ -327,14 +287,15 @@ export const speechProviderOptions: ProviderOption[] = [
     supportsVoices: true,
     modelOptions: [{ id: "v1", label: "v1" }],
     defaultModel: "v1",
-    defaultBaseUrl: "https://unspeech.hyp3r.link/v1/",
+    defaultBaseUrl: "https://openspeech.bytedance.com/api/v1/tts",
   },
   {
-    id: "alibaba-cloud-model-studio",
+    id: "alibaba-cloud-model-studio-speech",
     label: "Alibaba Cloud Model Studio",
     icon: "i-lobe-icons:alibabacloud",
     description: "bailian.console.aliyun.com",
     category: "speech",
+    engineId: "alibaba-cloud-model-studio-speech",
     requiresApiKey: true,
     requiresBaseUrl: true,
     supportsModels: true,
@@ -344,65 +305,7 @@ export const speechProviderOptions: ProviderOption[] = [
       { id: "cosyvoice-v2", label: "cosyvoice-v2" },
     ],
     defaultModel: "cosyvoice-v1",
-    defaultBaseUrl: "https://unspeech.hyp3r.link/v1/",
-  },
-  {
-    id: "volcengine",
-    label: "Volcengine",
-    icon: "i-lobe-icons:volcengine",
-    description: "volcengine.com",
-    category: "speech",
-    requiresApiKey: true,
-    requiresBaseUrl: true,
-    supportsModels: true,
-    supportsVoices: true,
-    modelOptions: [{ id: "v1", label: "v1" }],
-    defaultModel: "v1",
-    defaultBaseUrl: "https://unspeech.hyp3r.link/v1/",
-  },
-  {
-    id: "elevenlabs",
-    label: "ElevenLabs",
-    icon: "i-simple-icons:elevenlabs",
-    description: "Voice synthesis & cloning.",
-    category: "speech",
-    defaultBaseUrl: "https://api.elevenlabs.io/v1/",
-    requiresApiKey: true,
-    requiresBaseUrl: true,
-  },
-  {
-    id: "microsoft-speech",
-    label: "Microsoft / Azure Speech",
-    icon: "i-lobe-icons:microsoft",
-    description: "Microsoft speech services.",
-    category: "speech",
-    requiresApiKey: true,
-  },
-  {
-    id: "index-tts-vllm",
-    label: "Bilibili Index TTS",
-    icon: "i-lobe-icons:bilibiliindex",
-    description: "index-tts.github.io",
-    category: "speech",
-    defaultBaseUrl: "http://localhost:8000/v1/",
-    requiresBaseUrl: true,
-  },
-  {
-    id: "comet-api-speech",
-    label: "Comet API",
-    icon: "i-lobe-icons:cometapi",
-    description: "Comet API speech.",
-    category: "speech",
-    requiresApiKey: true,
-  },
-  {
-    id: "player2-speech",
-    label: "Player2 Speech",
-    icon: "i-lobe-icons:player2",
-    description: "Local gameplay assistant speech.",
-    category: "speech",
-    defaultBaseUrl: "http://localhost:4315/v1/",
-    requiresBaseUrl: true,
+    defaultBaseUrl: "https://dashscope.aliyuncs.com",
   },
   {
     id: "app-local-audio-speech",
@@ -446,11 +349,11 @@ export const transcriptionProviderOptions: ProviderOption[] = [
   },
   {
     id: "aliyun-nls-transcription",
-    label: "Aliyun NLS",
+    label: "Alibaba Cloud Model Studio",
     icon: "i-lobe-icons:alibabacloud",
-    description: "Aliyun transcription.",
+    description: "Alibaba Bailian ASR transcription.",
     category: "transcription",
-    requiresApiKey: true,
+    engineId: "aliyun-nls-asr",
   },
   {
     id: "comet-api-transcription",

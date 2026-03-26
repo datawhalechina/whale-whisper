@@ -19,7 +19,6 @@ import {
 import { useActionTokenPromptSync } from "@whalewhisper/app-core/composables/use-action-token-prompt-sync";
 import { useChatStore } from "@whalewhisper/app-core/stores/chat";
 import { useLive2dRuntime } from "@whalewhisper/app-core/stores/live2d-runtime";
-import { useSpeechOutputStore } from "@whalewhisper/app-core/stores/speech-output";
 import { useUiStore } from "@whalewhisper/app-core/stores/ui";
 import DesktopSessionPanel from "./components/DesktopSessionPanel.vue";
 import StageViewOverlay from "./components/StageViewOverlay.vue";
@@ -48,7 +47,6 @@ const stageSettings = useStageSettingsStore();
 const uiStore = useUiStore();
 const chatStore = useChatStore();
 const live2dRuntime = useLive2dRuntime();
-const speechOutput = useSpeechOutputStore();
 const { stageDragEnabled, stageViewControlsEnabled } = storeToRefs(stageSettings);
 const { sessionsOpen } = storeToRefs(uiStore);
 const { scale, positionInPercentageString, modelRect } = storeToRefs(live2d);
@@ -96,7 +94,6 @@ let unlistenHover: null | (() => void) = null;
 let unlistenCursor: null | (() => void) = null;
 let unlistenChat: null | (() => void) = null;
 let unlistenActionToken: null | (() => void) = null;
-let disposeSpeechOutput: null | (() => void) = null;
 let boundsTimer: number | null = null;
 let canvasTimer: number | null = null;
 const hoverFadeOpacity = 0.35;
@@ -514,9 +511,6 @@ onMounted(async () => {
   }).then((unlisten) => {
     unlistenActionToken = unlisten ?? null;
   });
-  disposeSpeechOutput = chatStore.onAssistantFinal(async (message) => {
-    speechOutput.speak(message.content);
-  });
 });
 
 onUnmounted(() => {
@@ -554,7 +548,6 @@ onUnmounted(() => {
     unlistenActionToken();
     unlistenActionToken = null;
   }
-  disposeSpeechOutput?.();
 });
 
 function handleContextMenu(event: MouseEvent) {

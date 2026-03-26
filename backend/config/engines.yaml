@@ -106,7 +106,7 @@ tts:
     - id: volcengine-speech
       label: Volcengine
       type: openai_compat
-      base_url: https://unspeech.hyp3r.link/v1
+      base_url: https://openspeech.bytedance.com/api/v1/tts
       model: v1
       api_key_env: UNSPEECH_API_KEY
       paths:
@@ -120,8 +120,8 @@ tts:
     - id: alibaba-cloud-model-studio-speech
       label: Alibaba Cloud Model Studio
       type: openai_compat
-      base_url: https://unspeech.hyp3r.link/v1
-      model: alibaba/cosyvoice-v1
+      base_url: https://dashscope.aliyuncs.com
+      model: cosyvoice-v1
       api_key_env: BAILIAN_API_KEY
       paths:
         speech: /audio/speech
@@ -197,6 +197,30 @@ asr:
           default: json
         - name: language
           type: string
+    - id: aliyun-nls-asr
+      label: Alibaba Bailian ASR
+      type: aliyun_dashscope_asr
+      base_url: https://dashscope.aliyuncs.com
+      model: qwen3-asr-flash-realtime
+      api_key_env: DASHSCOPE_API_KEY
+      defaults:
+        region: cn-beijing
+        enable_server_vad: false
+        enable_itn: false
+        enable_words: true
+      params:
+        - name: enable_server_vad
+          type: bool
+          default: false
+        - name: region
+          type: string
+          default: cn-beijing
+        - name: enable_itn
+          type: bool
+          default: false
+        - name: enable_words
+          type: bool
+          default: true
     - id: dify-asr
       label: Dify ASR
       type: dify_asr

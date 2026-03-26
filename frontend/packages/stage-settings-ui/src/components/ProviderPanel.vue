@@ -123,6 +123,13 @@ function resolveLabel(field: ProviderField) {
 function resolvePlaceholder(field: ProviderField) {
   if (field.placeholder) return field.placeholder;
   if (field.id === "apiKey") return "sk-...";
+  if (
+    field.id === "voice" &&
+    field.type === "select" &&
+    (field.options?.length ?? 0) === 0
+  ) {
+    return isZh.value ? "没有支持的声线" : "No compatible voices";
+  }
   if (field.id === "model") return t("providers.placeholder.model");
   if (field.id === "voice") return t("providers.placeholder.voice");
   return field.label || t("common.select");
