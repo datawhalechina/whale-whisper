@@ -16,8 +16,8 @@ from app.api.engine_schemas import (
     EngineRunRequest,
     HealthResponse,
 )
-from app.services.engines import registry
-from app.services.engines import runtime_store
+from app.services.engines import registry, runtime_store
+from app.services.agents.utils import coerce_bool
 from app.services.engines.health import check_engine_health
 from app.services.agents import (
     AgentContext,
@@ -116,7 +116,7 @@ async def run_agent_engine(request: EngineRunRequest) -> StreamingResponse:
     spec = registry.get("agent", engine_id)
     handler = build_agent_handler(runtime)
     params = request.config if isinstance(request.config, dict) else {}
-    memory_bridge = _coerce_bool(params.get("memory_bridge") or params.get("memoryBridge"))
+    memory_bridge = coerce_bool(params.get("memory_bridge") or params.get("memoryBridge"))
     params = _strip_agent_config(params)
     if memory_bridge:
         scope = _extract_memory_scope(request.data)
@@ -190,16 +190,6 @@ def _extract_memory_scope(data: Any) -> MemoryScope:
 def _strip_agent_config(config: Dict[str, Any]) -> Dict[str, Any]:
     blocked = {"memory_bridge", "memoryBridge"}
     return {key: value for key, value in config.items() if key not in blocked}
-
-
-def _coerce_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "on"}
-    return False
 
 
 def _resolve_capabilities(spec) -> Dict[str, Any]:
