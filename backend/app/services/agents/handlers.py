@@ -253,8 +253,9 @@ class FastGPTAgentHandler(AgentHandler):
         params = _apply_fastgpt_defaults(context)
         base_url = params.get("base_url")
         api_key = params.get("api_key")
-        uid = params.get("uid")
         conversation_id = params.get("conversation_id") or ""
+        variables = _coerce_fastgpt_variables(params.get("variables"))
+        detail = params.get("detail", False)
 
         if not base_url:
             yield AgentEvent(event="error", data={"message": "Missing FastGPT base URL."})
@@ -276,25 +277,32 @@ class FastGPTAgentHandler(AgentHandler):
         payload = {
             "chatId": conversation_id,
             "stream": True,
-            "detail": False,
+            "detail": bool(detail),
             "messages": [
                 {"role": "user", "content": text},
             ],
-            "customUid": uid,
         }
+        if variables:
+            payload["variables"] = variables
 
         chat_path = _resolve_path(context.runtime, "chat", "/v1/chat/completions")
         async with httpx.AsyncClient(timeout=context.runtime.timeout) as client:
-            async with client.stream(
-                "POST",
-                _build_url(base_url, chat_path),
-                headers=headers,
-                json=payload,
-            ) as response:
-                response.raise_for_status()
+            async with client.stream("POST", _build_url(base_url, chat_path), headers=headers, json=payload) as response:
+                if response.status_code >= 400:
+                    detail = await _read_error_detail(response)
+                    yield AgentEvent(event="error", data={"message": detail})
+                    return
+                current_conversation_id = conversation_id
+                current_event: Optional[str] = None
                 async for line in response.aiter_lines():
                     chunk = line.strip()
-                    if not chunk or not chunk.startswith("data:"):
+                    if not chunk:
+                        current_event = None
+                        continue
+                    if chunk.startswith("event:"):
+                        current_event = chunk.split("event:", 1)[1].strip()
+                        continue
+                    if not chunk.startswith("data:"):
                         continue
                     data_payload = chunk.split("data:", 1)[1].strip()
                     if not data_payload or data_payload == "[DONE]":
@@ -303,13 +311,31 @@ class FastGPTAgentHandler(AgentHandler):
                         data = json.loads(data_payload)
                     except json.JSONDecodeError:
                         continue
-                    try:
-                        delta = data["choices"][0].get("delta") or {}
-                        content = delta.get("content")
-                    except (KeyError, IndexError, TypeError):
-                        content = None
-                    if content:
-                        yield AgentEvent(event="message.delta", data={"text": str(content)})
+
+                    if not current_conversation_id:
+                        extracted_id = _extract_fastgpt_chat_id(data)
+                        if extracted_id:
+                            current_conversation_id = extracted_id
+                            yield AgentEvent(event="conversation.id", data={"conversation_id": extracted_id})
+
+                    event_type = current_event or "answer"
+                    if event_type in ("answer", "fastAnswer"):
+                        try:
+                            delta = data.get("choices", [{}])[0].get("delta") or {}
+                            content = delta.get("content")
+                        except (KeyError, IndexError, TypeError):
+                            content = None
+                        if content:
+                            yield AgentEvent(event="message.delta", data={"text": str(content)})
+                    elif event_type == "error":
+                        message = (
+                            data.get("message") or data.get("error") or "Unknown error"
+                        )
+                        yield AgentEvent(event="error", data={"message": str(message)})
+                    elif event_type == "interactive":
+                        yield AgentEvent(event="interactive", data={"interactive": data.get("interactive", {})})
+                    elif event_type == "flowResponses":
+                        yield AgentEvent(event="flow_responses", data={"responses": data})
 
         yield AgentEvent(event="message.done", data={})
 
@@ -593,6 +619,36 @@ def _extract_conversation_id(payload: Any) -> str:
     if isinstance(payload, str):
         return payload
     return ""
+
+
+def _extract_fastgpt_chat_id(data: Dict[str, Any]) -> Optional[str]:
+    """从 FastGPT SSE 响应中提取 chatId"""
+    for key in ("chatId", "chat_id", "conversation_id", "conversationId", "id"):
+        value = data.get(key)
+        if isinstance(value, str) and value:
+            return value
+    nested = data.get("data")
+    if isinstance(nested, dict):
+        for key in ("chatId", "chat_id", "conversation_id", "conversationId", "id"):
+            value = nested.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return None
+
+
+def _coerce_fastgpt_variables(value: Any) -> Dict[str, Any]:
+    """解析 FastGPT variables 参数"""
+    if value is None or value == "":
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
 
 
 register_agent_handler({"dify", "dify_agent"}, DifyAgentHandler)
