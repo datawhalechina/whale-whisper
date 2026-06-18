@@ -8,7 +8,6 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 import app.services.providers.registry as provider_registry_module  # noqa: E402
-from app.services.engines.runtime_store import EngineRuntimeConfig, store as runtime_store  # noqa: E402
 from app.services.providers.types import ProviderConfig  # noqa: E402
 
 
