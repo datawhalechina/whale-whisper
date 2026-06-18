@@ -348,31 +348,6 @@ def _build_volcengine_extra_body(overrides: Dict[str, Any]) -> Dict[str, Any]:
     return extra_body
 
 
-def _build_alibaba_extra_body(overrides: Dict[str, Any]) -> Dict[str, Any]:
-    extra_body = {
-        **_read_map(overrides, "extraBody"),
-        **_read_map(overrides, "extra_body"),
-    }
-
-    rate = _read_number(overrides, "rate")
-    if rate is not None:
-        extra_body["rate"] = rate
-
-    pitch = _read_number(overrides, "pitch")
-    if pitch is not None:
-        extra_body["pitch"] = pitch
-
-    volume = _read_number(overrides, "volume")
-    if volume is not None:
-        extra_body["volume"] = volume
-
-    sample_rate = _read_number(overrides, "sample_rate", "sampleRate")
-    if sample_rate is not None:
-        extra_body["sample_rate"] = int(sample_rate)
-
-    return extra_body
-
-
 def _build_unspeech_payload(
     engine_id: str,
     runtime_config,
@@ -404,13 +379,6 @@ def _build_unspeech_payload(
     speed = _read_number(overrides, "speed")
     if speed is not None:
         payload["speed"] = speed
-
-    if engine_id in VOLCENGINE_ENGINE_IDS:
-        payload["extra_body"] = _build_volcengine_extra_body(overrides)
-    elif engine_id in ALIBABA_ENGINE_IDS:
-        extra_body = _build_alibaba_extra_body(overrides)
-        if extra_body:
-            payload["extra_body"] = extra_body
 
     return payload
 
