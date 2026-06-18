@@ -261,14 +261,16 @@ agent:
       paths:
         chat: /v3/chat
         conversation: /v1/conversation/create
-        health: /health
+        health: /v1/workspaces
       defaults:
         user: whale
       params:
         - name: token
           type: secret
+          description: Coze API Token (optional if set via COZE_TOKEN env)
         - name: bot_id
           type: string
+          description: Coze Bot ID
         - name: api_base
           type: string
           default: https://api.coze.cn

@@ -1,10 +1,14 @@
 import logging
 import time
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 
 from app.core.settings import get_settings
 from app.extensions import ext_catalogs, ext_cors, ext_engines, ext_logging
+
+# Load .env file into environment variables
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
