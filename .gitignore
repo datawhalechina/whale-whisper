@@ -25,3 +25,6 @@ backend/data/
 # IDE
 .vscode/
 airi/
+
+# Environment
+.env
