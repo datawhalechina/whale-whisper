@@ -9,6 +9,15 @@ class ProviderFieldOption(BaseModel):
     description: Optional[str] = None
     icon: Optional[str] = None
 
+    @classmethod
+    def from_spec(cls, spec) -> "ProviderFieldOption":
+        return cls(
+            id=spec.id,
+            label=spec.label,
+            description=spec.description,
+            icon=spec.icon,
+        )
+
 
 class ProviderField(BaseModel):
     id: str
@@ -25,6 +34,21 @@ class ProviderField(BaseModel):
     class Config:
         populate_by_name = True
 
+    @classmethod
+    def from_spec(cls, spec) -> "ProviderField":
+        return cls(
+            id=spec.id,
+            label=spec.label,
+            field_type=spec.field_type,
+            required=spec.required,
+            placeholder=spec.placeholder,
+            default=spec.default,
+            description=spec.description,
+            scope=spec.scope,
+            options=[ProviderFieldOption.from_spec(o) for o in spec.options],
+            options_source=spec.options_source,
+        )
+
 
 class ProviderDefaults(BaseModel):
     base_url: Optional[str] = Field(default=None, alias="baseUrl")
@@ -33,6 +57,14 @@ class ProviderDefaults(BaseModel):
 
     class Config:
         populate_by_name = True
+
+    @classmethod
+    def from_spec(cls, spec) -> "ProviderDefaults":
+        return cls(
+            base_url=spec.base_url,
+            model=spec.model,
+            voice=spec.voice,
+        )
 
 
 class ProviderDesc(BaseModel):
@@ -47,6 +79,19 @@ class ProviderDesc(BaseModel):
 
     class Config:
         populate_by_name = True
+
+    @classmethod
+    def from_spec(cls, spec, fields: Optional[List["ProviderField"]] = None) -> "ProviderDesc":
+        return cls(
+            id=spec.id,
+            label=spec.label,
+            category=spec.category,
+            icon=spec.icon,
+            description=spec.description,
+            engine_id=spec.engine_id,
+            defaults=ProviderDefaults.from_spec(spec.defaults) if spec.defaults else None,
+            fields=fields if fields is not None else [ProviderField.from_spec(f) for f in spec.fields],
+        )
 
 
 class ProviderCatalogResponse(BaseModel):
