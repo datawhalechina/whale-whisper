@@ -3,7 +3,11 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from app.api.provider_catalog_schemas import ProviderCatalogResponse, ProviderDesc
+from app.api.provider_catalog_schemas import (
+    ProviderCatalogResponse,
+    ProviderDesc,
+    ProviderField,
+)
 from app.services.providers.registry import registry
 from app.services.providers.types import ProviderConfig
 from app.services.catalogs.provider_catalog import get_provider_catalog
@@ -37,53 +41,24 @@ class ProviderVoicesResponse(BaseModel):
     voices: List[Dict[str, Any]] = Field(default_factory=list)
 
 
-def _provider_field_to_dict(field) -> Dict[str, Any]:
-    return {
-        "id": field.id,
-        "label": field.label,
-        "type": field.field_type,
-        "required": field.required,
-        "placeholder": field.placeholder,
-        "default": field.default,
-        "description": field.description,
-        "scope": field.scope,
-        "options": [
-            {
-                "id": option.id,
-                "label": option.label,
-                "description": option.description,
-                "icon": option.icon,
-            }
-            for option in field.options
-        ],
-        "optionsSource": field.options_source,
-    }
-
-
-def _aliyun_nls_default_field_dicts() -> List[Dict[str, Any]]:
+def _aliyun_nls_default_fields() -> List[ProviderField]:
     return [
-        {
-            "id": "apiKey",
-            "label": "API Key",
-            "type": "secret",
-            "required": True,
-            "placeholder": None,
-            "default": None,
-            "description": None,
-            "scope": "config",
-            "options": [],
-            "optionsSource": None,
-        },
+        ProviderField(
+            id="apiKey",
+            label="API Key",
+            field_type="secret",
+            required=True,
+        ),
     ]
 
 
-def _resolve_provider_field_dicts(spec) -> List[Dict[str, Any]]:
-    fields = [_provider_field_to_dict(field) for field in spec.fields]
+def _resolve_provider_fields(spec) -> List[ProviderField]:
+    fields = [ProviderField.from_spec(field) for field in spec.fields]
     if spec.id != ALIYUN_NLS_PROVIDER_ID:
         return fields
 
     # Keep UI minimal for this provider: only API key is exposed.
-    return _aliyun_nls_default_field_dicts()
+    return _aliyun_nls_default_fields()
 
 
 def _to_config(request: ProviderRequest) -> ProviderConfig:
@@ -121,22 +96,7 @@ async def list_voices(request: ProviderRequest) -> ProviderVoicesResponse:
 async def list_provider_catalog() -> ProviderCatalogResponse:
     catalog = get_provider_catalog()
     providers = [
-        ProviderDesc(
-            id=spec.id,
-            label=spec.label,
-            category=spec.category,
-            icon=spec.icon,
-            description=spec.description,
-            engineId=spec.engine_id,
-            defaults={
-                "baseUrl": spec.defaults.base_url,
-                "model": spec.defaults.model,
-                "voice": spec.defaults.voice,
-            }
-            if spec.defaults
-            else None,
-            fields=_resolve_provider_field_dicts(spec),
-        )
+        ProviderDesc.from_spec(spec, fields=_resolve_provider_fields(spec))
         for spec in catalog.list()
     ]
     return ProviderCatalogResponse(providers=providers)

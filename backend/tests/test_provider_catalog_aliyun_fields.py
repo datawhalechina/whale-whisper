@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
-from app.api.providers import _resolve_provider_field_dicts
+from app.api.providers import _resolve_provider_fields
 from app.services.catalogs.provider_catalog import ProviderFieldSpec, ProviderSpec
 
 
@@ -39,8 +39,8 @@ def test_aliyun_catalog_fields_are_normalized_when_openai_style_fields_present()
         ],
     )
 
-    fields = _resolve_provider_field_dicts(spec)
-    field_ids = [item["id"] for item in fields]
+    fields = _resolve_provider_fields(spec)
+    field_ids = [item.id for item in fields]
 
     assert field_ids == ["apiKey"]
     assert "baseUrl" not in field_ids
@@ -59,8 +59,8 @@ def test_aliyun_catalog_fields_are_forced_to_minimal_shape():
         ],
     )
 
-    fields = _resolve_provider_field_dicts(spec)
-    field_ids = [item["id"] for item in fields]
+    fields = _resolve_provider_fields(spec)
+    field_ids = [item.id for item in fields]
 
     assert field_ids == ["apiKey"]
 
