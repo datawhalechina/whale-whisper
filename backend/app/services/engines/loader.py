@@ -11,10 +11,10 @@ def bootstrap_engines() -> None:
     config = _load_engine_config()
     if not config:
         return
-    _load_llm_engines(config.get("llm") or {})
-    _load_tts_engines(config.get("tts") or {})
-    _load_asr_engines(config.get("asr") or {})
-    _load_agent_engines(config.get("agent") or {})
+    _load_engines("llm", config.get("llm") or {})
+    _load_engines("tts", config.get("tts") or {})
+    _load_engines("asr", config.get("asr") or {})
+    _load_engines("agent", config.get("agent") or {}, default_type="agent")
 
 
 def _load_engine_config() -> Dict[str, Any]:
@@ -34,7 +34,11 @@ def _load_engine_config() -> Dict[str, Any]:
     return data
 
 
-def _load_llm_engines(config: Dict[str, Any]) -> None:
+def _load_engines(
+    kind: str,
+    config: Dict[str, Any],
+    default_type: str = "openai_compat",
+) -> None:
     default_id = _as_str(config.get("default"))
     engines = config.get("engines")
     if not isinstance(engines, list):
@@ -50,7 +54,7 @@ def _load_llm_engines(config: Dict[str, Any]) -> None:
 
         label = _as_str(engine.get("label")) or engine_id
         description = _as_str(engine.get("description"))
-        engine_type = _as_str(engine.get("type")) or "openai_compat"
+        engine_type = _as_str(engine.get("type")) or default_type
         metadata = _parse_metadata(engine, engine_type)
 
         params = _parse_params(engine.get("params"))
@@ -61,7 +65,7 @@ def _load_llm_engines(config: Dict[str, Any]) -> None:
             params=params,
             metadata=metadata,
         )
-        registry.register("llm", spec, default=engine_id == default_id or index == 0)
+        registry.register(kind, spec, default=engine_id == default_id or index == 0)
 
         base_url = _as_str(engine.get("base_url") or engine.get("baseUrl") or "")
         model = _as_str(engine.get("model") or "")
@@ -71,166 +75,11 @@ def _load_llm_engines(config: Dict[str, Any]) -> None:
         default_params = _parse_defaults(engine, params)
 
         runtime_store.register(
-            "llm",
+            kind,
             EngineRuntimeConfig(
                 id=engine_id,
                 base_url=base_url,
                 model=model,
-                api_key_env=api_key_env or None,
-                headers={str(k): str(v) for k, v in headers.items()},
-                timeout=timeout,
-                default_params=default_params,
-                engine_type=engine_type,
-                paths=_parse_paths(engine.get("paths")),
-            ),
-        )
-
-
-def _load_tts_engines(config: Dict[str, Any]) -> None:
-    default_id = _as_str(config.get("default"))
-    engines = config.get("engines")
-    if not isinstance(engines, list):
-        return
-
-    for index, engine in enumerate(engines):
-        if not isinstance(engine, dict):
-            continue
-
-        engine_id = _as_str(engine.get("id"))
-        if not engine_id:
-            continue
-
-        label = _as_str(engine.get("label")) or engine_id
-        description = _as_str(engine.get("description"))
-        engine_type = _as_str(engine.get("type")) or "openai_compat"
-        metadata = _parse_metadata(engine, engine_type)
-
-        params = _parse_params(engine.get("params"))
-        spec = EngineSpec(
-            id=engine_id,
-            label=label,
-            description=description,
-            params=params,
-            metadata=metadata,
-        )
-        registry.register("tts", spec, default=engine_id == default_id or index == 0)
-
-        base_url = _as_str(engine.get("base_url") or engine.get("baseUrl") or "")
-        model = _as_str(engine.get("model") or "")
-        api_key_env = _as_str(engine.get("api_key_env") or engine.get("apiKeyEnv"))
-        headers = engine.get("headers") if isinstance(engine.get("headers"), dict) else {}
-        timeout = _as_float(engine.get("timeout"), 60.0)
-        default_params = _parse_defaults(engine, params)
-
-        runtime_store.register(
-            "tts",
-            EngineRuntimeConfig(
-                id=engine_id,
-                base_url=base_url,
-                model=model,
-                api_key_env=api_key_env or None,
-                headers={str(k): str(v) for k, v in headers.items()},
-                timeout=timeout,
-                default_params=default_params,
-                engine_type=engine_type,
-                paths=_parse_paths(engine.get("paths")),
-            ),
-        )
-
-
-def _load_asr_engines(config: Dict[str, Any]) -> None:
-    default_id = _as_str(config.get("default"))
-    engines = config.get("engines")
-    if not isinstance(engines, list):
-        return
-
-    for index, engine in enumerate(engines):
-        if not isinstance(engine, dict):
-            continue
-
-        engine_id = _as_str(engine.get("id"))
-        if not engine_id:
-            continue
-
-        label = _as_str(engine.get("label")) or engine_id
-        description = _as_str(engine.get("description"))
-        engine_type = _as_str(engine.get("type")) or "openai_compat"
-        metadata = _parse_metadata(engine, engine_type)
-
-        params = _parse_params(engine.get("params"))
-        spec = EngineSpec(
-            id=engine_id,
-            label=label,
-            description=description,
-            params=params,
-            metadata=metadata,
-        )
-        registry.register("asr", spec, default=engine_id == default_id or index == 0)
-
-        base_url = _as_str(engine.get("base_url") or engine.get("baseUrl") or "")
-        model = _as_str(engine.get("model") or "")
-        api_key_env = _as_str(engine.get("api_key_env") or engine.get("apiKeyEnv"))
-        headers = engine.get("headers") if isinstance(engine.get("headers"), dict) else {}
-        timeout = _as_float(engine.get("timeout"), 60.0)
-        default_params = _parse_defaults(engine, params)
-
-        runtime_store.register(
-            "asr",
-            EngineRuntimeConfig(
-                id=engine_id,
-                base_url=base_url,
-                model=model,
-                api_key_env=api_key_env or None,
-                headers={str(k): str(v) for k, v in headers.items()},
-                timeout=timeout,
-                default_params=default_params,
-                engine_type=engine_type,
-                paths=_parse_paths(engine.get("paths")),
-            ),
-        )
-
-
-def _load_agent_engines(config: Dict[str, Any]) -> None:
-    default_id = _as_str(config.get("default"))
-    engines = config.get("engines")
-    if not isinstance(engines, list):
-        return
-
-    for index, engine in enumerate(engines):
-        if not isinstance(engine, dict):
-            continue
-
-        engine_id = _as_str(engine.get("id"))
-        if not engine_id:
-            continue
-
-        label = _as_str(engine.get("label")) or engine_id
-        description = _as_str(engine.get("description"))
-        engine_type = _as_str(engine.get("type")) or "agent"
-        metadata = _parse_metadata(engine, engine_type)
-
-        params = _parse_params(engine.get("params"))
-        spec = EngineSpec(
-            id=engine_id,
-            label=label,
-            description=description,
-            params=params,
-            metadata=metadata,
-        )
-        registry.register("agent", spec, default=engine_id == default_id or index == 0)
-
-        base_url = _as_str(engine.get("base_url") or engine.get("baseUrl") or "")
-        api_key_env = _as_str(engine.get("api_key_env") or engine.get("apiKeyEnv"))
-        headers = engine.get("headers") if isinstance(engine.get("headers"), dict) else {}
-        timeout = _as_float(engine.get("timeout"), 60.0)
-        default_params = _parse_defaults(engine, params)
-
-        runtime_store.register(
-            "agent",
-            EngineRuntimeConfig(
-                id=engine_id,
-                base_url=base_url,
-                model=_as_str(engine.get("model") or ""),
                 api_key_env=api_key_env or None,
                 headers={str(k): str(v) for k, v in headers.items()},
                 timeout=timeout,
