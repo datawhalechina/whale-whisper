@@ -58,58 +58,34 @@ def test_resolve_tts_api_key_prefers_request_override():
             os.environ["TEST_TTS_KEY"] = previous
 
 
-def test_build_unspeech_payload_for_volcengine():
+def test_build_unspeech_payload_generic_path():
+    """_build_unspeech_payload only runs for non-volcengine/non-alibaba engines
+    (run_tts_engine returns early for those), so exercise the generic payload
+    path with a neutral engine id and assert no provider-specific extra_body."""
     runtime = EngineRuntimeConfig(
-        id="volcengine-speech",
+        id="unspeech-generic",
         base_url="https://unspeech.example/v1",
         model="v1",
     )
 
     payload = _build_unspeech_payload(
-        engine_id="volcengine-speech",
+        engine_id="unspeech-generic",
         runtime_config=runtime,
-        text="hello volcengine",
+        text="hello generic",
         overrides={
             "model": "v1",
             "voice": "zh_female_sample",
-            "appId": "appid-123",
             "response_format": "mp3",
+            "speed": 1.2,
         },
     )
 
-    assert payload["model"] == "volcengine/v1"
+    assert payload["model"] == "v1"
     assert payload["voice"] == "zh_female_sample"
-    assert payload["input"] == "hello volcengine"
+    assert payload["input"] == "hello generic"
     assert payload["response_format"] == "mp3"
-    assert payload["extra_body"]["app"]["appid"] == "appid-123"
-
-
-def test_build_unspeech_payload_for_alibaba():
-    runtime = EngineRuntimeConfig(
-        id="alibaba-cloud-model-studio-speech",
-        base_url="https://unspeech.example/v1",
-        model="alibaba/cosyvoice-v1",
-    )
-
-    payload = _build_unspeech_payload(
-        engine_id="alibaba-cloud-model-studio-speech",
-        runtime_config=runtime,
-        text="hello alibaba",
-        overrides={
-            "model": "cosyvoice-v1",
-            "voice": "longxiaochun_v2",
-            "rate": 1.2,
-            "pitch": 0.9,
-            "volume": 80,
-        },
-    )
-
-    assert payload["model"] == "alibaba/cosyvoice-v1"
-    assert payload["voice"] == "longxiaochun_v2"
-    assert payload["input"] == "hello alibaba"
-    assert payload["extra_body"]["rate"] == 1.2
-    assert payload["extra_body"]["pitch"] == 0.9
-    assert payload["extra_body"]["volume"] == 80
+    assert payload["speed"] == 1.2
+    assert "extra_body" not in payload
 
 
 def test_build_volcengine_provider_payload_direct():
@@ -213,8 +189,7 @@ def test_decorate_tts_error_for_volcengine_grant_issue():
 if __name__ == "__main__":
     run("extract tts input supports string and object forms", test_extract_tts_input_supports_string_and_object_forms)
     run("resolve tts api key prefers request override", test_resolve_tts_api_key_prefers_request_override)
-    run("build unspeech payload for volcengine", test_build_unspeech_payload_for_volcengine)
-    run("build unspeech payload for alibaba", test_build_unspeech_payload_for_alibaba)
+    run("build unspeech payload generic path", test_build_unspeech_payload_generic_path)
     run("build volcengine provider payload direct", test_build_volcengine_provider_payload_direct)
     run(
         "resolve volcengine tts url ignores client url override",
