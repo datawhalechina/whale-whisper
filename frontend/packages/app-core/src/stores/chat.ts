@@ -385,6 +385,18 @@ function prepareOutgoingMessage(
       pushMessage({ role: "error", content: payload.message || rawText || "Agent error." });
       return;
     }
+
+    if (event.event === "interactive") {
+      // FastGPT interactive node - currently just log, future UI handling possible
+      console.log("[Agent] Interactive event:", payload.interactive || payload);
+      return;
+    }
+
+    if (event.event === "flow_responses" || event.event === "flowResponses") {
+      // FastGPT flow responses - currently just log, future UI handling possible
+      console.log("[Agent] Flow responses:", payload.responses || payload);
+      return;
+    }
   }
 
   function sanitizeAgentConfig(config: Record<string, unknown>) {

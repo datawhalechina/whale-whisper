@@ -9,7 +9,7 @@ import httpx
 from app.core.http_utils import normalize_path
 from app.services.engines.runtime_store import EngineRuntimeConfig
 from .types import AgentEvent
-from .utils import merge_params
+from .utils import coerce_bool, coerce_json_dict, merge_params
 
 
 @dataclass
@@ -22,7 +22,9 @@ class AgentHandler:
     async def create_conversation(self, context: AgentContext) -> str:
         return ""
 
-    async def stream(self, context: AgentContext, text: str) -> AsyncIterator[AgentEvent]:
+    async def stream(
+        self, context: AgentContext, text: str
+    ) -> AsyncIterator[AgentEvent]:
         if not text:
             return
         yield AgentEvent(event="message.delta", data={"text": text})
@@ -69,7 +71,9 @@ class DifyAgentHandler(AgentHandler):
             data = response.json()
         return str(data.get("conversation_id") or "")
 
-    async def stream(self, context: AgentContext, text: str) -> AsyncIterator[AgentEvent]:
+    async def stream(
+        self, context: AgentContext, text: str
+    ) -> AsyncIterator[AgentEvent]:
         params = _apply_dify_defaults(context)
         api_server = params.get("api_server")
         api_key = params.get("api_key")
@@ -78,7 +82,9 @@ class DifyAgentHandler(AgentHandler):
         inputs = _coerce_dify_inputs(params)
 
         if not api_server:
-            yield AgentEvent(event="error", data={"message": "Missing Dify API server."})
+            yield AgentEvent(
+                event="error", data={"message": "Missing Dify API server."}
+            )
             return
         if not api_key:
             yield AgentEvent(event="error", data={"message": "Missing Dify API key."})
@@ -134,7 +140,9 @@ class DifyAgentHandler(AgentHandler):
                     answer = data.get("answer")
                     event_name = data.get("event", "")
                     if answer and "message" in str(event_name):
-                        yield AgentEvent(event="message.delta", data={"text": str(answer)})
+                        yield AgentEvent(
+                            event="message.delta", data={"text": str(answer)}
+                        )
 
         yield AgentEvent(event="message.done", data={})
 
@@ -152,7 +160,9 @@ class CozeAgentHandler(AgentHandler):
             "Content-Type": "application/json",
         }
         headers.update(context.runtime.headers)
-        conversation_path = _resolve_path(context.runtime, "conversation", "/v1/conversation/create")
+        conversation_path = _resolve_path(
+            context.runtime, "conversation", "/v1/conversation/create"
+        )
         async with httpx.AsyncClient(timeout=context.runtime.timeout) as client:
             response = await client.post(
                 _build_url(api_base, conversation_path),
@@ -162,7 +172,9 @@ class CozeAgentHandler(AgentHandler):
             data = response.json()
         return str(data.get("data", {}).get("id") or "")
 
-    async def stream(self, context: AgentContext, text: str) -> AsyncIterator[AgentEvent]:
+    async def stream(
+        self, context: AgentContext, text: str
+    ) -> AsyncIterator[AgentEvent]:
         params = _apply_coze_defaults(context)
         api_base = params.get("api_base")
         token = params.get("token")
@@ -183,7 +195,9 @@ class CozeAgentHandler(AgentHandler):
         if not conversation_id:
             conversation_id = await self.create_conversation(context)
             if conversation_id:
-                yield AgentEvent(event="conversation.id", data={"conversation_id": conversation_id})
+                yield AgentEvent(
+                    event="conversation.id", data={"conversation_id": conversation_id}
+                )
 
         headers = {
             "Authorization": f"Bearer {token}",
@@ -210,7 +224,9 @@ class CozeAgentHandler(AgentHandler):
             api_url = f"{api_url}{separator}conversation_id={conversation_id}"
 
         async with httpx.AsyncClient(timeout=context.runtime.timeout) as client:
-            async with client.stream("POST", api_url, headers=headers, json=payload) as response:
+            async with client.stream(
+                "POST", api_url, headers=headers, json=payload
+            ) as response:
                 response.raise_for_status()
                 event_name: Optional[str] = None
                 async for line in response.aiter_lines():
@@ -233,10 +249,14 @@ class CozeAgentHandler(AgentHandler):
                         continue
                     reasoning_content = message_json.get("reasoning_content")
                     if reasoning_content:
-                        yield AgentEvent(event="message.think", data={"text": str(reasoning_content)})
+                        yield AgentEvent(
+                            event="message.think", data={"text": str(reasoning_content)}
+                        )
                     content = message_json.get("content")
                     if content:
-                        yield AgentEvent(event="message.delta", data={"text": str(content)})
+                        yield AgentEvent(
+                            event="message.delta", data={"text": str(content)}
+                        )
 
         yield AgentEvent(event="message.done", data={})
 
@@ -247,26 +267,31 @@ class FastGPTAgentHandler(AgentHandler):
         conversation_id = params.get("conversation_id")
         if conversation_id:
             return str(conversation_id)
-        return os.urandom(8).hex()
+        return ""
 
-    async def stream(self, context: AgentContext, text: str) -> AsyncIterator[AgentEvent]:
+    async def stream(
+        self, context: AgentContext, text: str
+    ) -> AsyncIterator[AgentEvent]:
         params = _apply_fastgpt_defaults(context)
         base_url = params.get("base_url")
         api_key = params.get("api_key")
-        uid = params.get("uid")
         conversation_id = params.get("conversation_id") or ""
+        variables = coerce_json_dict(params.get("variables"))
+        detail = coerce_bool(params.get("detail"), default=False)
 
         if not base_url:
-            yield AgentEvent(event="error", data={"message": "Missing FastGPT base URL."})
+            yield AgentEvent(
+                event="error", data={"message": "Missing FastGPT base URL."}
+            )
             return
         if not api_key:
-            yield AgentEvent(event="error", data={"message": "Missing FastGPT API key."})
+            yield AgentEvent(
+                event="error", data={"message": "Missing FastGPT API key."}
+            )
             return
 
         if not conversation_id:
             conversation_id = await self.create_conversation(context)
-            if conversation_id:
-                yield AgentEvent(event="conversation.id", data={"conversation_id": conversation_id})
 
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -276,25 +301,34 @@ class FastGPTAgentHandler(AgentHandler):
         payload = {
             "chatId": conversation_id,
             "stream": True,
-            "detail": False,
+            "detail": detail,
             "messages": [
                 {"role": "user", "content": text},
             ],
-            "customUid": uid,
         }
+        if variables:
+            payload["variables"] = variables
 
         chat_path = _resolve_path(context.runtime, "chat", "/v1/chat/completions")
         async with httpx.AsyncClient(timeout=context.runtime.timeout) as client:
             async with client.stream(
-                "POST",
-                _build_url(base_url, chat_path),
-                headers=headers,
-                json=payload,
+                "POST", _build_url(base_url, chat_path), headers=headers, json=payload
             ) as response:
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    detail = await _read_error_detail(response)
+                    yield AgentEvent(event="error", data={"message": detail})
+                    return
+                current_conversation_id = conversation_id
+                current_event: Optional[str] = None
                 async for line in response.aiter_lines():
                     chunk = line.strip()
-                    if not chunk or not chunk.startswith("data:"):
+                    if not chunk:
+                        current_event = None
+                        continue
+                    if chunk.startswith("event:"):
+                        current_event = chunk.split("event:", 1)[1].strip()
+                        continue
+                    if not chunk.startswith("data:"):
                         continue
                     data_payload = chunk.split("data:", 1)[1].strip()
                     if not data_payload or data_payload == "[DONE]":
@@ -303,13 +337,41 @@ class FastGPTAgentHandler(AgentHandler):
                         data = json.loads(data_payload)
                     except json.JSONDecodeError:
                         continue
-                    try:
-                        delta = data["choices"][0].get("delta") or {}
-                        content = delta.get("content")
-                    except (KeyError, IndexError, TypeError):
-                        content = None
-                    if content:
-                        yield AgentEvent(event="message.delta", data={"text": str(content)})
+
+                    if not current_conversation_id:
+                        extracted_id = _extract_fastgpt_chat_id(data)
+                        if extracted_id:
+                            current_conversation_id = extracted_id
+                            yield AgentEvent(
+                                event="conversation.id",
+                                data={"conversation_id": extracted_id},
+                            )
+
+                    event_type = current_event or "answer"
+                    if event_type in ("answer", "fastAnswer"):
+                        try:
+                            delta = data.get("choices", [{}])[0].get("delta") or {}
+                            content = delta.get("content")
+                        except (KeyError, IndexError, TypeError):
+                            content = None
+                        if content:
+                            yield AgentEvent(
+                                event="message.delta", data={"text": str(content)}
+                            )
+                    elif event_type == "error":
+                        message = (
+                            data.get("message") or data.get("error") or "Unknown error"
+                        )
+                        yield AgentEvent(event="error", data={"message": str(message)})
+                    elif event_type == "interactive":
+                        yield AgentEvent(
+                            event="interactive",
+                            data={"interactive": data.get("interactive", {})},
+                        )
+                    elif event_type == "flowResponses":
+                        yield AgentEvent(
+                            event="flow_responses", data={"responses": data}
+                        )
 
         yield AgentEvent(event="message.done", data={})
 
@@ -325,7 +387,9 @@ class CustomAgentHandler(AgentHandler):
         if not base_url:
             return ""
 
-        conversation_path = context.runtime.paths.get("conversation") if context.runtime.paths else None
+        conversation_path = (
+            context.runtime.paths.get("conversation") if context.runtime.paths else None
+        )
         if not conversation_path:
             return ""
 
@@ -340,11 +404,15 @@ class CustomAgentHandler(AgentHandler):
 
         return _extract_conversation_id(data)
 
-    async def stream(self, context: AgentContext, text: str) -> AsyncIterator[AgentEvent]:
+    async def stream(
+        self, context: AgentContext, text: str
+    ) -> AsyncIterator[AgentEvent]:
         params = _apply_custom_defaults(context)
         base_url = params.get("base_url")
         if not base_url:
-            yield AgentEvent(event="error", data={"message": "Missing custom agent base URL."})
+            yield AgentEvent(
+                event="error", data={"message": "Missing custom agent base URL."}
+            )
             return
 
         chat_path = _resolve_path(context.runtime, "chat", "/chat")
@@ -358,7 +426,9 @@ class CustomAgentHandler(AgentHandler):
         }
 
         async with httpx.AsyncClient(timeout=context.runtime.timeout) as client:
-            async with client.stream("POST", url, headers=headers, json=payload) as response:
+            async with client.stream(
+                "POST", url, headers=headers, json=payload
+            ) as response:
                 response.raise_for_status()
                 async for event in _stream_sse_events(response):
                     yield event
@@ -369,7 +439,9 @@ class CustomAgentHandler(AgentHandler):
 _HANDLER_REGISTRY: Dict[str, Type[AgentHandler]] = {}
 
 
-def register_agent_handler(engine_types: Iterable[str], handler: Type[AgentHandler]) -> None:
+def register_agent_handler(
+    engine_types: Iterable[str], handler: Type[AgentHandler]
+) -> None:
     for engine_type in engine_types:
         if not engine_type:
             continue
@@ -449,7 +521,9 @@ def _build_dify_url(base_url: str, path: str) -> str:
     return normalized_base + normalized_path
 
 
-def _build_headers(runtime: EngineRuntimeConfig, api_key: Optional[str]) -> Dict[str, str]:
+def _build_headers(
+    runtime: EngineRuntimeConfig, api_key: Optional[str]
+) -> Dict[str, str]:
     headers = {"Content-Type": "application/json"}
     headers.update(runtime.headers)
     if api_key:
@@ -473,18 +547,7 @@ def _coerce_dify_conversation_id(value: Any) -> str:
 
 
 def _coerce_dify_inputs(params: Dict[str, Any]) -> Dict[str, Any]:
-    inputs = params.get("inputs")
-    if inputs is None or inputs == "":
-        return {}
-    if isinstance(inputs, dict):
-        return inputs
-    if isinstance(inputs, str):
-        try:
-            parsed = json.loads(inputs)
-        except json.JSONDecodeError:
-            return {}
-        if isinstance(parsed, dict):
-            return parsed
+    return coerce_json_dict(params.get("inputs"))
     return {}
 
 
@@ -500,7 +563,9 @@ async def _read_error_detail(response: httpx.Response) -> str:
         except json.JSONDecodeError:
             return text
         if isinstance(payload, dict):
-            message = payload.get("message") or payload.get("detail") or payload.get("error")
+            message = (
+                payload.get("message") or payload.get("detail") or payload.get("error")
+            )
             code = payload.get("code")
             if message and code:
                 return f"{message} ({code})"
@@ -536,7 +601,9 @@ async def _stream_sse_events(response: httpx.Response) -> AsyncIterator[AgentEve
             yield event
 
 
-def _normalize_custom_event(event_name: Optional[str], payload_text: str) -> Optional[AgentEvent]:
+def _normalize_custom_event(
+    event_name: Optional[str], payload_text: str
+) -> Optional[AgentEvent]:
     name = (event_name or "").strip()
     data: Any = payload_text
     if payload_text:
@@ -545,7 +612,13 @@ def _normalize_custom_event(event_name: Optional[str], payload_text: str) -> Opt
         except json.JSONDecodeError:
             data = payload_text
 
-    if name in {"message.delta", "message.think", "message.done", "conversation.id", "error"}:
+    if name in {
+        "message.delta",
+        "message.think",
+        "message.done",
+        "conversation.id",
+        "error",
+    }:
         return _coerce_agent_event(name, data)
     if name in {"done", "message.done", "final"}:
         return AgentEvent(event="message.done", data={})
@@ -566,7 +639,11 @@ def _coerce_agent_event(event: str, data: Any) -> AgentEvent:
         return AgentEvent(event=event, data={"text": ""})
     if event == "conversation.id":
         if isinstance(data, dict):
-            conversation_id = data.get("conversation_id") or data.get("conversationId") or data.get("id")
+            conversation_id = (
+                data.get("conversation_id")
+                or data.get("conversationId")
+                or data.get("id")
+            )
             return AgentEvent(event=event, data={"conversation_id": conversation_id})
         if isinstance(data, str):
             return AgentEvent(event=event, data={"conversation_id": data})
@@ -593,6 +670,21 @@ def _extract_conversation_id(payload: Any) -> str:
     if isinstance(payload, str):
         return payload
     return ""
+
+
+def _extract_fastgpt_chat_id(data: Dict[str, Any]) -> Optional[str]:
+    """从 FastGPT SSE 响应中提取 chatId"""
+    for key in ("chatId", "chat_id", "conversation_id", "conversationId", "id"):
+        value = data.get(key)
+        if isinstance(value, str) and value:
+            return value
+    nested = data.get("data")
+    if isinstance(nested, dict):
+        for key in ("chatId", "chat_id", "conversation_id", "conversationId", "id"):
+            value = nested.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return None
 
 
 register_agent_handler({"dify", "dify_agent"}, DifyAgentHandler)

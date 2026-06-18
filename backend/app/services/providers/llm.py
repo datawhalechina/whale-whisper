@@ -202,10 +202,9 @@ class DifyProvider(LLMProvider):
 
 
 class FastGPTProvider(LLMProvider):
-    def __init__(self, base_url: str, api_key: str, uid: str, timeout: float) -> None:
+    def __init__(self, base_url: str, api_key: str, timeout: float) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
-        self.uid = uid
         self.timeout = timeout
 
     async def generate(
@@ -227,7 +226,6 @@ class FastGPTProvider(LLMProvider):
             "messages": [
                 {"role": "user", "content": text},
             ],
-            "customUid": user_id or self.uid,
         }
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.post(f"{self.base_url}/v1/chat/completions", headers=headers, json=payload)
@@ -389,7 +387,6 @@ def build_llm_provider(settings: AppSettings) -> LLMProvider:
         return FastGPTProvider(
             base_url=settings.fastgpt_base_url,
             api_key=settings.fastgpt_api_key,
-            uid=settings.fastgpt_uid,
             timeout=settings.llm_timeout,
         )
     if provider == "coze":
@@ -436,11 +433,9 @@ def build_llm_provider_from_config(
             raise LLMConfigError("FastGPT base URL is required")
         if not config.api_key:
             raise LLMConfigError("FastGPT API key is required")
-        uid = config.extra.get("uid") if isinstance(config.extra, dict) else None
         return FastGPTProvider(
             base_url=config.base_url,
             api_key=config.api_key,
-            uid=uid or settings.fastgpt_uid,
             timeout=settings.llm_timeout,
         )
 
