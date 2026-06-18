@@ -513,8 +513,6 @@ def _resolve_aliyun_dashscope_credentials(config, overrides: Dict[str, Any]) -> 
         raise HTTPException(status_code=400, detail="Alibaba Bailian ASR missing apiKey")
 
     model = ALIYUN_ASR_REALTIME_MODEL
-    if not model:
-        raise HTTPException(status_code=400, detail="Alibaba Bailian ASR missing model")
 
     return {
         "params": params,
