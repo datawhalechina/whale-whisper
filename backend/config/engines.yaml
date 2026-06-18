@@ -284,21 +284,18 @@ agent:
       api_key_env: FASTGPT_API_KEY
       paths:
         chat: /v1/chat/completions
+        health: /health
       defaults:
-        detail: false
+        uid: whale
       params:
         - name: base_url
           type: string
           default: https://cloud.fastgpt.cn/api
         - name: api_key
           type: secret
-        - name: variables
+        - name: uid
           type: string
-          description: JSON object for app input variables, e.g. {"user_name":"小明"}
-        - name: detail
-          type: boolean
-          default: false
-          description: Return detailed response including sources and metadata
+          default: whale
     - id: custom-agent
       label: Custom Agent
       type: custom_agent
