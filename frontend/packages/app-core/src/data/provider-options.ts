@@ -1,10 +1,10 @@
-export type ProviderCategory = "chat" | "speech" | "transcription";
+// SelectOption is defined once in provider-catalog.ts and re-exported here
+// to preserve the public `./data/provider-options` import surface.
+// Do not redeclare it — a duplicate definition shadows the canonical one
+// via `export *` in index.ts and the two had drifted (icon field).
+export type { SelectOption } from "./provider-catalog";
 
-export type SelectOption = {
-  id: string;
-  label: string;
-  description?: string;
-};
+export type ProviderCategory = "chat" | "speech" | "transcription";
 
 export type ProviderExtraField = {
   id: string;
