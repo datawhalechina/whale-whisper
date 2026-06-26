@@ -33,15 +33,15 @@ const softPunctuations = new Set([
   "」",
 ]);
 
-export type TtsChunkReason = "boost" | "limit" | "hard" | "flush" | "special";
+type TtsChunkReason = "boost" | "limit" | "hard" | "flush" | "special";
 
-export interface TtsInputChunk {
+interface TtsInputChunk {
   text: string;
   words: number;
   reason: TtsChunkReason;
 }
 
-export interface TtsInputChunkOptions {
+interface TtsInputChunkOptions {
   boost?: number;
   minimumWords?: number;
   maximumWords?: number;

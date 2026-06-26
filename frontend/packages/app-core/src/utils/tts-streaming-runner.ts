@@ -1,10 +1,10 @@
-export interface TtsChunkQueueResult {
+interface TtsChunkQueueResult {
   succeeded: number;
   failed: number;
   lastError: unknown | null;
 }
 
-export interface TtsChunkQueueContext {
+interface TtsChunkQueueContext {
   chunk: string;
   index: number;
   total: number;
@@ -23,7 +23,7 @@ export class TtsChunkQueueError extends Error {
   }
 }
 
-export interface RunTtsChunkQueueOptions {
+interface RunTtsChunkQueueOptions {
   onChunkError?: (error: unknown, context: TtsChunkQueueContext) => void;
   stopOnError?: boolean;
 }
